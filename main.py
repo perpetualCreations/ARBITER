@@ -17,6 +17,8 @@ import swbs
 import configparser
 import socket
 import nmap3
+import sqlite3
+from hashlib import md5
 from typing import Union
 from ipaddress import IPv4Address, IPv4Network
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +32,11 @@ class Exceptions:
     class ClientManagerException(BaseException):
         """
         A Daemon.ClientManager thread has raised a general exception.
+        """
+
+    class DirectivesManagerException(BaseException):
+        """
+        A Daemon.DirectivesManager instance has raised a general exception.
         """
 
 
@@ -119,6 +126,152 @@ class Daemon(swbs.Server):
                             Daemon.Herder.disconnect(self)
                     except BaseException:
                         Daemon.Herder.disconnect(self)
+
+    class DirectivesManager:
+        """
+        SQLite3 database manager, that handles I/O operations to and from the directives database.
+        """
+        # TODO awaiting implementation
+        directive_type_flag = None
+        directive_path_flag = None
+        null_flag = None
+
+        def __init__(self, file: str):
+            """
+            Manager initialization.
+            """
+            self.connection = sqlite3.connect(file)
+            self.cursor = self.connection.cursor()
+            try:
+                self.cursor.execute("SELECT * FROM agents")
+            except sqlite3.OperationalError:
+                self.cursor.execute("CREATE TABLE agents (nid INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
+                                    "uuid TEXT NOT NULL, directive_path TEXT, directive_type TEXT)")
+                self.connection.commit()
+            pass
+
+        @staticmethod
+        def sanitize(uuid: str) -> str:
+            """
+            Sanitize UUID if not standard UUID.
+
+            :param uuid: str, agent UUID, must be alphanumeric, hyphens/dashes are allowed, no spaces (as standard
+                UUIDs should be), non-standard UUIDs that disobey this specification will be normalized through MD5
+                hashing
+            :return: str, UUID or hash of disallowed non-standard UUID
+            """
+            # up for scrutiny, is this adequate sanitation?
+            uuid = uuid.replace(" ", "")
+            if uuid.replace("-", "").isalnum() is False:
+                uuid = md5(uuid.encode("ascii")).hexdigest()
+            return uuid
+
+        def add_agent(self, uuid: str, directive_type: Union[str, None] = None,
+                      directive_path: Union[str, None] = None) -> None:
+            """
+            Add agent to database. If agent already exists, overwrites.
+
+            :param uuid: str, agent UUID, must be alphanumeric, hyphens/dashes are allowed, no spaces (as standard
+                UUIDs should be), non-standard UUIDs that disobey this specification will be normalized through MD5
+                hashing
+            :param directive_type: str, type of directive, valid types are SCRIPT and APPLICATION, if None no directive
+                is registered, and no directive will be assigned to the agent, has cross-dependency with directive_path
+                requiring both to be not None and defined to have a record registered, default None
+            :param directive_path: str, path to directive, being Python module or script text file, if None no directive
+                is registered, and no directive will be assigned to the agent, has cross-dependency with directive_path
+                requiring both to be not None and defined to have a record registered, default None
+            :return: None
+            """
+            uuid = "'" + Daemon.DirectivesManager.sanitize(uuid) + "'"
+            if directive_path is None or directive_type is None:
+                directive_path = ":null"
+                directive_type = ":null"
+            else:
+                directive_path = "'" + directive_path + "'"
+                directive_type = "'" + directive_type + "'"
+            try:
+                self.cursor.execute("INSERT INTO agents (uuid, directive_path, directive_type) VALUES (" + uuid + ", " +
+                                    directive_path + ", " + directive_type + ")", {"null": None})
+                self.connection.commit()
+            except sqlite3.OperationalError:
+                self.cursor.execute("DELETE FROM agents WHERE uuid = '" + uuid + "'")
+                self.cursor.execute("INSERT INTO agents (uuid, directive_path, directive_type) VALUES (" + uuid + ", " +
+                                    directive_path + ", " + directive_type + ")", {"null": None})
+                self.connection.commit()
+
+        def remove_agent(self, uuid: str) -> None:
+            """
+            Remove agent from database.
+
+            :param uuid: str, agent UUID, must be alphanumeric, hyphens/dashes are allowed, no spaces (as standard
+                UUIDs should be), non-standard UUIDs that disobey this specification will be normalized through MD5
+                hashing
+            :return: None
+            """
+            uuid = Daemon.DirectivesManager.sanitize(uuid)
+            try:
+                self.cursor.execute("DELETE FROM agents WHERE uuid = '" + uuid + "'")
+                self.connection.commit()
+            except sqlite3.OperationalError as ParentException:
+                raise Exceptions.DirectivesManagerException("Failed to remove agent entry for (UUID) " + uuid + ".") \
+                    from ParentException
+
+        def edit_agent(self, uuid: str, mod: dict) -> None:
+            """
+            Edit agent in database.
+
+            :param uuid: str, agent UUID, must be alphanumeric, hyphens/dashes are allowed, no spaces (as standard
+                UUIDs should be), non-standard UUIDs that disobey this specification will be normalized through MD5
+                hashing
+            :param mod: dict, should contain modifications to agent row, specify "uuid", "directive_path", and
+                "directive_type" (case-sensitive) as keys being the columns to be overwritten, the output assigned to
+                keys being the new value of the column, example {"directive_path":"/home/hokma/directives.txt"}, to
+                clear directive_path or directive_type set them to "NULL" or None
+            :return: None
+            """
+            uuid = Daemon.DirectivesManager.sanitize(uuid)
+            # piped into SQL execution
+            settings = ""
+            for column in list(mod.keys()):
+                if column not in ["uuid", "directive_path", "directive_type"]:
+                    mod.pop(column)
+                    continue
+                if column in ["directive_path", "directive_type"] and mod[column] in ["NULL", None]:
+                    settings += column + " = :null, "
+                    continue
+                settings += column + " = '" + mod[column] + "', "
+            settings = settings.rstrip(", ")
+            try:
+                self.cursor.execute("UPDATE agents SET " + settings + " WHERE uuid = '" + uuid + "';", {"null": None})
+                self.connection.commit()
+            except sqlite3.OperationalError as ParentException:
+                raise Exceptions.DirectivesManagerException("Failed to edit agent entry for (UUID) " + uuid + ".") \
+                    from ParentException
+
+        def get_agent(self, uuid: str) -> tuple:
+            """
+            Get agent record in database.
+
+            :return: tuple, database row for agent entry
+            """
+            uuid = Daemon.DirectivesManager.sanitize(uuid)
+            return self.cursor.execute("SELECT * FROM agents WHERE uuid = '" + uuid + "';").fetchone()
+
+        def get_all_agents(self) -> list:
+            """
+            Get ALL agents from database.
+
+            :return: tuple, database row for agent entry
+            """
+            return self.cursor.execute("SELECT * FROM agents").fetchall()
+
+        def parse_directive(self, uuid: str) -> any:
+            """
+            Parse directives for agent by UUID.
+
+            :return: dict
+            """
+            entry = Daemon.DirectivesManager.get_agent(self, uuid)
 
     class ClientManager(swbs.ServerClientManagers.ClientManager):
         """
