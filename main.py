@@ -18,10 +18,12 @@ import configparser
 import socket
 import nmap3
 import sqlite3
+import sys
 from hashlib import md5
 from typing import Union
 from ipaddress import IPv4Address, IPv4Network
 from concurrent.futures import ThreadPoolExecutor
+from os.path import splitext, split
 
 
 class Exceptions:
@@ -132,9 +134,9 @@ class Daemon(swbs.Server):
         SQLite3 database manager, that handles I/O operations to and from the directives database.
         """
         # TODO awaiting implementation
-        directive_type_flag = None
-        directive_path_flag = None
-        null_flag = None
+        DIRECTIVE_TYPE = None
+        DIRECTIVE_PATH = None
+        NULL = None
 
         def __init__(self, file: str):
             """
@@ -190,14 +192,14 @@ class Daemon(swbs.Server):
                 directive_path = "'" + directive_path + "'"
                 directive_type = "'" + directive_type + "'"
             try:
+                if Daemon.DirectivesManager.get_agent(self, uuid) is None:
+                    self.cursor.execute("DELETE FROM agents WHERE uuid = " + uuid)
                 self.cursor.execute("INSERT INTO agents (uuid, directive_path, directive_type) VALUES (" + uuid + ", " +
                                     directive_path + ", " + directive_type + ")", {"null": None})
                 self.connection.commit()
-            except sqlite3.OperationalError:
-                self.cursor.execute("DELETE FROM agents WHERE uuid = '" + uuid + "'")
-                self.cursor.execute("INSERT INTO agents (uuid, directive_path, directive_type) VALUES (" + uuid + ", " +
-                                    directive_path + ", " + directive_type + ")", {"null": None})
-                self.connection.commit()
+            except sqlite3.OperationalError as ParentException:
+                raise Exceptions.DirectivesManagerException("Failed to add entry for (UUID) " + uuid + ".") \
+                    from ParentException
 
         def remove_agent(self, uuid: str) -> None:
             """
@@ -252,6 +254,9 @@ class Daemon(swbs.Server):
             """
             Get agent record in database.
 
+            :param uuid: str, agent UUID, must be alphanumeric, hyphens/dashes are allowed, no spaces (as standard
+                UUIDs should be), non-standard UUIDs that disobey this specification will be normalized through MD5
+                hashing
             :return: tuple, database row for agent entry
             """
             uuid = Daemon.DirectivesManager.sanitize(uuid)
@@ -265,13 +270,34 @@ class Daemon(swbs.Server):
             """
             return self.cursor.execute("SELECT * FROM agents").fetchall()
 
-        def parse_directive(self, uuid: str) -> any:
+        def parse_directive(self, uuid: str) -> Union[list, object, None]:
             """
             Parse directives for agent by UUID.
 
-            :return: dict
+            :param uuid: str, agent UUID, must be alphanumeric, hyphens/dashes are allowed, no spaces (as standard
+                UUIDs should be), non-standard UUIDs that disobey this specification will be normalized through MD5
+                hashing
+            :return: Union[list, object, None], returns None if no directive is registered, returns list with commands
+                if directive is a script, returns Python module if directive is an application
             """
             entry = Daemon.DirectivesManager.get_agent(self, uuid)
+            if entry is None:
+                raise Exceptions.DirectivesManagerException("Entry for (UUID) " + uuid + " does not exist.")
+            if entry[2] is None or entry[3] is None:
+                return None
+            if entry[3] == "SCRIPT":
+                # noinspection PyBroadException
+                try:
+                    with open(entry[2]) as script_handle:
+                        return script_handle.read().split("\n")
+                except BaseException as ParentException:
+                    raise Exceptions.DirectivesManagerException("Failed to interpret script directive.") \
+                        from ParentException
+            if entry[3] == "APPLICATION":
+                sys.path.append(split(entry[2])[0])
+                target = None  # placeholder, so PyCharm knows this exists, overwritten by exec import below
+                exec("import " + splitext(split(entry[2])[1])[0] + " as target")
+                return target
 
     class ClientManager(swbs.ServerClientManagers.ClientManager):
         """
