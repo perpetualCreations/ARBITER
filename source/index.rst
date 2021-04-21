@@ -1,0 +1,44 @@
+Python 3 Linux Daemon for Managing KINETIC Agents
+=================================================
+:Latest Version - |version|:
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Contents:
+
+Indices and tables
+------------------
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
+* `Back to Projects </index.html##projects>`_
+
+Install
+-------
+ARBITER can be installed with APT or manually installed with a Debian package file.
+Please see `preliminary documentation </index.html###ppa>`_ for how to add the PPA repository required for APT installation and updating.
+
+.. code-block:: bash
+
+   sudo apt install arbiter
+
+.. parsed-literal::
+
+   wget https://github.com/perpetualCreations/arbiter/releases/download/\ |release|\ /arbiter_\ |release|\ _all.deb
+   sudo apt install /path/to/wheel/file/arbiter_\ |release|\ _all.deb
+
+.. |release| replace:: |version|
+
+Configuration
+-------------
+TODO, stage not applicable.
+
+Scripts
+-------
+ARBITER uses a custom scripting language, called NAVSCRIPT. The script file is in plaintext, and should exist in the OS file system ARBITER is running on.
+
+Please see `preliminary documentation </projects/spec_providence/docs/NAVSCRIPT.html>`_ for how to add the PPA repository required for APT installation and updating.
+
+Applications
+------------
+TODO, stage not applicable.
