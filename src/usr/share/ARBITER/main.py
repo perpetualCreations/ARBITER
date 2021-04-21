@@ -11,6 +11,11 @@
 
 ARBITER
 Made by perpetualCreations
+
+Notices for future development,
+It's likely ARBITER will eventually support meshes, where multiple instances are collaborating to manage agents.
+Coordination will become difficult, be ready to refactor ARBITER into different server types, separating ClientManager,
+DirectivesManager, and Herder. Modularity is key, flexibility too. Something like that.
 """
 
 import swbs
@@ -54,6 +59,7 @@ class Daemon(swbs.Server):
         Application initialization.
         """
         self.herder = Daemon.Herder(port, key, key_is_path, network_bits, herder_start_on_init, herder_workers)
+        self.directives_manager = Daemon.DirectivesManager("/etc/ARBITER/agency.db")
         super().__init__(port, key, Daemon.ClientManager, host, key_is_path, no_listen_on_init)
 
     class Herder(swbs.Client):
@@ -270,7 +276,7 @@ class Daemon(swbs.Server):
             """
             return self.cursor.execute("SELECT * FROM agents").fetchall()
 
-        def parse_directive(self, uuid: str) -> Union[list, object, None]:
+        def parse_directives(self, uuid: str) -> Union[list, object, None]:
             """
             Parse directives for agent by UUID.
 
@@ -299,44 +305,86 @@ class Daemon(swbs.Server):
                 exec("import " + splitext(split(entry[2])[1])[0] + " as target")
                 return target
 
-    class ClientManager(swbs.ServerClientManagers.ClientManager):
+    class ClientManager(swbs.ServerClientManagers.ClientManagerInstanceExposed):
         """
         ARBITER client manager, handles incoming clients along their life-cycle.
         Executed as a thread by Daemon listening thread.
+
+        TODO implement signal where if the following below occur,
+
+        - manual control is requested
+        - directive is re-assigned
+        - directive is manually executed
+        - directive is stopped
+
+        ...An interrupt occurs, and the signal is handled.
         """
 
         def __init__(self, instance, connection_socket: Union[socket.socket, object], client_id: int):
             """
             Manager initialization.
             """
+            self.agent_uuid = None
             super().__init__(instance, connection_socket, client_id)
+
+        def run(self) -> None:
+            """
+            Thread execution.
+
+            :return: None
+            """
             Daemon.ClientManager.send(self, "REQUEST TYPE")
             if Daemon.ClientManager.receive(self) != "KINETIC":
                 del self.instance.clients[self.client_id]
                 self.connection_socket.close()
                 raise Exceptions.ClientManagerException("Client is not a KINETIC agent. Stopped ClientManager "
                                                         "instance.")
-            self.instance.network.send("REQUEST UUID", self.connection_socket)
+            Daemon.ClientManager.send(self, "REQUEST UUID")
             self.agent_uuid = self.instance.network.receive(socket_instance=self.connection_socket)
+            if self.instance.directives_manager.get_agent(self.agent_uuid) is None:
+                self.instance.directives_manager.add_agent(self.agent_uuid)
+            else:
+                directives = self.instance.directives_manager.parse_directives(self.agent_uuid)
+                if directives is None:
+                    return
+                elif type(directives) is list:
+                    # TODO NAVSCRIPT parser, needs error handling
+                    index = 0
+                    while index > len(directives):
+                        if directives[index].split(" ")[0] == "GOTO":
+                            try:
+                                index = min(max(int(directives[index].split(" ")[1]), 0), len(directives) - 1)
+                            except IndexError:
+                                pass
+                            except ValueError:
+                                pass
+                            continue
+                        elif directives[index][:3] == "-#-":
+                            index += 1
+                            continue
+                        else:
+                            Daemon.ClientManager.send(self, directives[index])
+                            index += 1
+                            continue
+                else:
+                    raise NotImplementedError
+                # TODO application support
 
-        def send(self, message: Union[str, bytes], no_encrypt: bool = False) -> None:
+        def send(self, message: Union[str, bytes]) -> None:
             """
             SWBS send wrapper, to specify socket_instance as self.connection_socket.
 
             :param message: Union[str, bytes], message to be sent
-            :param no_encrypt: bool, if True does not encrypt message, default False
             :return: None
             """
-            Daemon.send(self.instance, message, self.connection_socket, no_encrypt)
+            Daemon.send(self.instance, message, self.connection_socket)
 
-        def receive(self, buffer_size: int = 4096, no_decrypt: bool = False, return_bytes: bool = False) -> \
-                Union[str, bytes]:
+        def receive(self, buffer_size: int = 4096, return_bytes: bool = False) -> Union[str, bytes]:
             """
             SWBS receive wrapper, to specify socket_instance as self.connection_socket.
 
             :param buffer_size: int, size of buffer for received bytes
-            :param no_decrypt: bool, if True does not decrypt message, default False
             :param return_bytes: bool, if True received bytes are not decoded to unicode string, default False
             :return: Union[str, bytes], message received
             """
-            return Daemon.receive(self.instance, buffer_size, self.connection_socket, no_decrypt, return_bytes)
+            return Daemon.receive(self.instance, buffer_size, self.connection_socket, return_bytes)
