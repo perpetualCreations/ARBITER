@@ -367,8 +367,8 @@ class Daemon(swbs.Server):
                             index += 1
                             continue
                 else:
-                    raise NotImplementedError
-                # TODO application support
+                    directives.Application(instance=self.instance, connection_socket=self.connection_socket,
+                                           client_id=self.client_id, uuid=self.agent_uuid)
 
         def send(self, message: Union[str, bytes]) -> None:
             """

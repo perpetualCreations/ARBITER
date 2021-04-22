@@ -35,10 +35,16 @@ TODO, stage not applicable.
 
 Scripts
 -------
-ARBITER uses a custom scripting language, called NAVSCRIPT. The script file is in plaintext, and should exist in the OS file system ARBITER is running on.
+ARBITER uses a custom scripting language, called NAVSCRIPT. The script file is in plaintext, and should exist in the OS file system ARBITER is running on, to be executed.
 
-Please see `preliminary documentation </projects/spec_providence/docs/NAVSCRIPT.html>`_ for how to add the PPA repository required for APT installation and updating.
+Please see `preliminary documentation </projects/spec_providence/docs/NAVSCRIPT.html>`_ for more information regarding this language.
 
 Applications
 ------------
-TODO, stage not applicable.
+In addition to scripts, ARBITER accepts Python modules. Specify a Python script file on the OS file system as a directive.
+
+ARBITER expects there to be a class called "Application" with parameters for instance, connection_socket, client_id, and uuid.
+The first three are the same parameters for swbs.ServerClientManagers.ClientManager derivatives. As such, they also share the same types.
+The fourth is the agent UUID, as a string.
+
+ARBITER will then initialize the "Application" class with those parameters, executing anything in the __init__ function of the class.
