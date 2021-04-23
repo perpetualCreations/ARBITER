@@ -19,7 +19,6 @@ DirectivesManager, and Herder. Modularity is key, flexibility too. Something lik
 """
 
 import swbs
-import configparser
 import socket
 import nmap3
 import sqlite3
@@ -53,7 +52,7 @@ class Daemon(swbs.Server):
     """
 
     def __init__(self, key: Union[str, bytes, None], key_is_path: bool = False, port: int = 999,
-                 host: str = "localhost", no_listen_on_init: bool = False, network_bits: int = 24,
+                 host: str = "localhost", no_listen_on_init: bool = False, network_bits: Union[None, int] = 24,
                  herder_start_on_init: bool = True, herder_workers: int = 2):
         """
         Application initialization.
@@ -348,7 +347,6 @@ class Daemon(swbs.Server):
                 if directives is None:
                     return
                 elif type(directives) is list:
-                    # TODO NAVSCRIPT parser, needs error handling
                     index = 0
                     while index > len(directives):
                         if directives[index].split(" ")[0] == "GOTO":

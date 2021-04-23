@@ -31,7 +31,9 @@ Please see `preliminary documentation </index.html###ppa>`_ for how to add the P
 
 Configuration
 -------------
-TODO, stage not applicable.
+Under the /etc/ARBITER/ directory is the init.cfg configuration file.
+
+Inline comments document each field. Please refer to them for advisories and preliminary information.
 
 Scripts
 -------
