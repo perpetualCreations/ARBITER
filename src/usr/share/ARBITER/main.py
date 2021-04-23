@@ -23,6 +23,7 @@ import socket
 import nmap3
 import sqlite3
 import sys
+import threading
 from hashlib import md5
 from typing import Union
 from ipaddress import IPv4Address, IPv4Network
@@ -138,10 +139,6 @@ class Daemon(swbs.Server):
         """
         SQLite3 database manager, that handles I/O operations to and from the directives database.
         """
-        # TODO awaiting implementation
-        DIRECTIVE_TYPE = None
-        DIRECTIVE_PATH = None
-        NULL = None
 
         def __init__(self, file: str):
             """
@@ -323,15 +320,20 @@ class Daemon(swbs.Server):
             """
             Manager initialization.
             """
+            self.application_thread = None
+            self.event_stop_directive = threading.Event()
+            self.event_start_directive = threading.Event()
             self.agent_uuid = None
             super().__init__(instance, connection_socket, client_id)
 
-        def run(self) -> None:
+        def process(self) -> None:
             """
-            Thread execution.
+            Actual execution.
 
             :return: None
             """
+            self.event_stop_directive.clear()
+            self.event_start_directive.clear()
             Daemon.ClientManager.send(self, "REQUEST TYPE")
             if Daemon.ClientManager.receive(self) != "KINETIC":
                 del self.instance.clients[self.client_id]
@@ -349,6 +351,10 @@ class Daemon(swbs.Server):
                 elif type(directives) is list:
                     index = 0
                     while index > len(directives):
+                        if self.event_stop_directive.is_set() is True:
+                            # probably unsafe for the agent, but we'll just slap on a bright yellow warning to end users
+                            # issuing directive stops
+                            break
                         if directives[index].split(" ")[0] == "GOTO":
                             try:
                                 index = min(max(int(directives[index].split(" ")[1]), 0), len(directives) - 1)
@@ -365,8 +371,27 @@ class Daemon(swbs.Server):
                             index += 1
                             continue
                 else:
-                    directives.Application(instance=self.instance, connection_socket=self.connection_socket,
-                                           client_id=self.client_id, uuid=self.agent_uuid)
+                    self.application_thread = threading.Thread(target=directives.Application,
+                                                               args={"instance": self.instance,
+                                                                     "connection_socket": self.connection_socket,
+                                                                     "client_id": self.client_id,
+                                                                     "uuid": self.agent_uuid,
+                                                                     "stop_event": self.event_stop_directive}).start()
+                    self.event_stop_directive.wait()
+                    # noinspection PyUnresolvedReferences
+                    # self.application_thread is a threading.Thread object, default None
+                    # under the conditions presented in current scope, it will always be a thread from this context
+                    self.application_thread.join()
+
+        def run(self) -> None:
+            """
+            Threading execution and handling.
+
+            :return: None
+            """
+            while True:
+                Daemon.ClientManager.process(self)
+                self.event_start_directive.wait()
 
         def send(self, message: Union[str, bytes]) -> None:
             """

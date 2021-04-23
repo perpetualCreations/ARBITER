@@ -5,7 +5,7 @@ Priority: optional
 Architecture: all
 Essential: no
 Installed-Size: 34581
-Depends: python3 (>= 3.7.3-1)
+Depends: python3 (>= 3.7.3-1), nmap
 Homepage: https://dreamerslegacy.xyz/
 Maintainer: perpetualCreations <tchen0584@gmail.com>
 Description: Manage KINETIC agents with automation scripts and applications, or manual control.
