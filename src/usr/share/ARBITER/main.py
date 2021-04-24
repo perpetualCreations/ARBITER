@@ -28,7 +28,9 @@ from hashlib import md5
 from typing import Union
 from ipaddress import IPv4Address, IPv4Network
 from concurrent.futures import ThreadPoolExecutor
-from os.path import splitext, split
+from os.path import splitext, split, isfile
+from os import remove
+from time import sleep
 
 
 class Exceptions:
@@ -60,6 +62,7 @@ class Daemon(swbs.Server):
         """
         self.herder = Daemon.Herder(port, key, key_is_path, network_bits, herder_start_on_init, herder_workers)
         self.directives_manager = Daemon.DirectivesManager("/etc/ARBITER/agency.db")
+        self.cli_queue_manager = Daemon.CLIQueueManager(self)
         super().__init__(port, key, Daemon.ClientManager, host, key_is_path, no_listen_on_init)
 
     class Herder(swbs.Client):
@@ -411,3 +414,56 @@ class Daemon(swbs.Server):
             :return: Union[str, bytes], message received
             """
             return Daemon.receive(self.instance, buffer_size, self.connection_socket, return_bytes)
+
+    class CLIQueueManager:
+        """
+        Manages incoming commands from /etc/ARBITER/queue.
+        """
+
+        def __init__(self, outer_self):
+            self.outer_self = outer_self
+            self.thread = threading.Thread(target=Daemon.CLIQueueManager.process, args=(self,), daemon=True).start()
+
+        def process(self) -> None:
+            """
+            Process through queue contents.
+
+            :return: None
+            """
+            while True:
+                if isfile("/etc/ARBITER/queue_lock") is True:
+                    sleep(1)
+                else:
+                    with open("/etc/ARBITER/queue_lock") as lock_handler:
+                        lock_handler.write("\x00")
+                    with open("/etc/ARBITER/queue") as queue_handler:
+                        queue = queue_handler.read()
+                        queue = queue.split("\n")
+                        for command in queue:
+                            if command[:3] == "-#-":
+                                continue
+                            else:
+                                components = command.split("<#>")
+                                LOOKUP = {
+                                    "directive_assign": lambda: self.outer_self.directives_manager.edit_agent(
+                                        self.outer_self.directives_manager, components[1], {
+                                            "directive_type": components[2], "directive_path": components[3]}),
+                                    "directive_start": lambda: Daemon.CLIQueueManager.interface_client_managers(
+                                        self, components[1]).event_start_directive.set(),
+                                    "directive_stop": lambda: Daemon.CLIQueueManager.interface_client_managers(
+                                        self, components[1]).event_stop_directive.set()}
+                                LOOKUP[components[0]]()
+                    with open("/etc/ARBITER/queue", "w") as queue_overwrite_handler:
+                        queue_overwrite_handler.write("-#- This is the queue file, any CLI operations get dumped here "
+                                                      "for ARBITER to parse. Robots only.")
+                    remove("/etc/ARBITER/queue_lock")
+
+        def interface_client_managers(self, uuid: str) -> object:
+            """
+            Get ClientManager instance by UUID.
+
+            :return: object, ClientManager
+            """
+            for client in self.outer_self.clients:
+                if self.outer_self.clients[client]["thread"].uuid == uuid:
+                    return self.outer_self.clients[client]["thread"]

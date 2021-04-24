@@ -62,6 +62,7 @@ Directives are like orders given to a subordinate. They are two types of directi
 One reads out with a line-by-line set of transmit-only commands to be sent, and the other is a full-fledged Python module, allowing for two-way communication and dynamic behavior.
 
 Directives can be assigned through the CLI or web interface, with additional options for stop and start.
+They are executed as soon as possible, upon the agent connecting to the ARBITER server.
 
 See below for more information.
 
@@ -97,3 +98,10 @@ Include instructions for graceful termination in the conditional.
 
 Alternatively, use a child thread with the .wait() function, blocking execution until set.
 Write instructions for safely exiting after the blocking wait call.
+
+Interfaces
+----------
+ARBITER has a CLI and web interface, the latter provided by Project FORESIGHT.
+
+The command-line interface can be accessed through command arbiter-manage.
+See arbiter-manage --help for a list of commands and their usage.

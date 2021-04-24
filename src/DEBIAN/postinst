@@ -2,6 +2,7 @@
 echo Installing Python 3 dependencies...
 sudo pip install -r /usr/share/ARBITER/requirements.txt
 echo Done.
+sudo chmod +x /usr/bin/arbiter-manage
 echo ===================================================================================================================
 echo Please consider changing the hostname of this computer to ARBITER, for service discovery by agents.
 echo See documentation for more information, and subsequent configuration.
