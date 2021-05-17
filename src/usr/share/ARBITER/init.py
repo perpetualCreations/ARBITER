@@ -1,4 +1,6 @@
 """
+ARBITER.
+
  ▄▄▄       ██▀███   ▄▄▄▄    ██▓▄▄▄█████▓▓█████  ██▀███
 ▒████▄    ▓██ ▒ ██▒▓█████▄ ▓██▒▓  ██▒ ▓▒▓█   ▀ ▓██ ▒ ██▒
 ▒██  ▀█▄  ▓██ ░▄█ ▒▒██▒ ▄██▒██▒▒ ▓██░ ▒░▒███   ▓██ ░▄█ ▒
@@ -9,7 +11,6 @@
   ░   ▒     ░░   ░  ░    ░  ▒ ░  ░         ░     ░░   ░
       ░  ░   ░      ░       ░              ░  ░   ░
 
-ARBITER
 Made by perpetualCreations
 
 init.py, starts Daemon service with configuration files.
@@ -31,7 +32,10 @@ if __name__ == "__main__":
         network_bits = None
     else:
         network_bits = int(network_bits)
-    main.Daemon(key, literal_eval(config_handler["security"]["key_is_path"]), int(config_handler["server"]["port"]),
-                config_handler["server"]["host"], literal_eval(config_handler["debug"]["no_listen_on_init"]),
-                network_bits, literal_eval(config_handler["herder"]["enable"]), int(config_handler["herder"]["workers"])
+    main.Daemon(key, literal_eval(config_handler["security"]["key_is_path"]),
+                int(config_handler["server"]["port"]),
+                config_handler["server"]["host"],
+                literal_eval(config_handler["debug"]["no_listen_on_init"]),
+                network_bits, literal_eval(config_handler["herder"]["enable"]),
+                int(config_handler["herder"]["workers"])
                 )
