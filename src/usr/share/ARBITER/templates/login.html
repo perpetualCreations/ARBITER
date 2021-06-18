@@ -1,0 +1,31 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>FORESIGHT Web Console</title>
+        <link rel="icon" href="{{ url_for('static', filename = 'favicon.ico') }}">
+        <link rel="stylesheet" type="text/css" href="https://dreamerslegacy.xyz/css/schema.min.css" referrerpolicy="noreferrer">
+    </head>
+    <body>
+        <div class = "schema">
+            <h1>FORESIGHT</h1>
+            <p>Server ID: {{ serverid }}</p>
+            <hr>
+            <div class="message-box-container">
+                <div class="message-box">
+                    <h2>Good evening, morning, or afternoon, administrator.</h2>
+                    <p>Please enter your credentials below.</p>
+                    <p style = "padding-top: 1%; padding-bottom: 1%; color: #ff4545;">{{ error }}</p>
+                    <hr>
+                    <div style = "padding-top: 8%;">
+                        <form action = "{{ url_for('login') }}" method = "POST">
+                            <input type = "password" name = "password" required>
+                            <input type = "submit" value="Login">
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>

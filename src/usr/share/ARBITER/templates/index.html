@@ -1,0 +1,97 @@
+<!DOCTYPE HTML>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>ARBITER Web Console</title>
+        <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+        <link rel="stylesheet" type="text/css" href="https://dreamerslegacy.xyz/css/schema.min.css" referrerpolicy="noreferrer">
+        <!-- <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='table.css') }}"> -->
+        <link rel="stylesheet" type="text/css" href="/src/usr/share/ARBITER/static/table.css">
+    </head>
+    <body>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
+        <script src="{{ url_for('static', filename='socket.js') }}"></script>
+        <div class="schema">
+            <h1>ARBITER</h1>
+            <p>Server ID: {{ serverid }}</p>
+            <hr>
+            <div class="button-container">
+                <a class="button" href="{{ url_for('logout') }}">Logout</a>
+                <a class="button" href="{{ url_for('change_password') }}">Change Password</a>
+            </div>
+            <hr>
+            <!-- warning displayed only when JavaScript is disabled -->
+            <noscript class="message-box-container">
+                <div class="message-box">
+                    <h2>Warning!</h2>
+                    <p style="color: #ff4545;">JavaScript is required for FORESIGHT to process live I/O.</p>
+                </div>
+            </noscript>
+            <!-- error log hidden, unless an error is raised -->
+            <div class="message-box-container" id="errors" style="display: none;">
+                <div class="message-box" style="padding-left: 15%; padding-right: 15%;">
+                    <h2>Errors</h2>
+                    <p style="color: #ff4545;">Errors have occurred since initialization. Please be attentive to resolving them, otherwise some functions may be broken or disabled.</p>
+                    <button class = "collapsible">View Log</button>
+                    <div class = "content" style="overflow-x: auto; overflow-y: auto; white-space: nowrap;" id="error-log">
+                    </div>
+                    <p class="hint">// Some errors may have additional information not shown in the log, and instead displayed in console.</p>
+                </div>
+            </div>
+            <div class="row">
+                <div class="column card">
+                    <h2>Agents</h2>
+                    <hr>
+                    <div class="table-container">
+                        <table id="agents-table">
+                            <thead>
+                                <tr>
+                                    <th>UUID</th>
+                                    <th>Name</th>
+                                    <th>Directive</th>
+                                    <th>Type</th>
+                                    <th>Connected?</th>
+                                    <th>Options</th>
+                                </tr>
+                            </thead>
+                            <tbody id="agents-table-content"></tbody>
+                        </table>
+                    </div>
+                    <hr>
+                    <button onclick="addAgent();">+</button>
+                </div>
+                <div class="column card">
+                    <h2>Manage</h2>
+                    <hr>
+                    <p class="hint" id="empty-manage-hint">// Select an agent from the Agents table, or add a new agent, to begin management.</p>
+                    <div id="add-agent">
+                        <p class="hint">// Currently adding a new agent. Enter hostname and press <i>Connect</i>, or <i>Cancel</i>.</p>
+                        <label for="host">Agent Hostname:</label>
+                        <input type="text" id="add-agent-input-host" name="host" required>
+                        <div class="button-container">
+                            <button onclick="">Connect</button>
+                            <button onclick="" style="color: var(--red);">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <script>
+                var coll = document.getElementsByClassName("collapsible");
+                var i;
+                for (i = 0; i < coll.length; i++) {
+                coll[i].addEventListener("click", function() {
+                    this.classList.toggle("active");
+                    document.getElementsByClassName("collapsible:after").content = "▲";
+                    var content = this.nextElementSibling;
+                    if (content.style.maxHeight){
+                    content.style.maxHeight = null;
+                    } else {
+                    content.style.maxHeight = content.scrollHeight + "px";
+                    }
+                });
+                }
+            </script>
+        </div>
+    </body>
+</html>

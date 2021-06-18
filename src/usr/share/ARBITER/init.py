@@ -25,7 +25,7 @@ config_handler.read("/etc/ARBITER/init.cfg")
 
 if __name__ == "__main__":
     key = config_handler["security"]["key"]
-    if key == "None":
+    if key.lower() == "none":
         key = None
     network_bits = config_handler["debug"]["network_bits"]
     if network_bits == "None":
@@ -37,5 +37,4 @@ if __name__ == "__main__":
                 config_handler["server"]["host"],
                 literal_eval(config_handler["debug"]["no_listen_on_init"]),
                 network_bits, literal_eval(config_handler["herder"]["enable"]),
-                int(config_handler["herder"]["workers"])
-                )
+                int(config_handler["herder"]["workers"]))

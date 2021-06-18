@@ -1,2 +1,8 @@
 swbs > 1.2
 python3-nmap
+Flask
+Flask-Login
+Flask-SocketIO
+jinja2
+gevent
+gevent-websocket
