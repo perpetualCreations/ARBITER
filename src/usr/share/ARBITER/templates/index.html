@@ -11,6 +11,8 @@
     </head>
     <body>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
+        <script src="https://mozilla.github.io/nunjucks/files/nunjucks.min.js" referrerpolicy="noreferrer"></script>
+        <script src="{{ url_for('static', filename='ui.js') }}"></script>
         <script src="{{ url_for('static', filename='socket.js') }}"></script>
         <div class="schema">
             <h1>ARBITER</h1>
@@ -25,7 +27,7 @@
             <noscript class="message-box-container">
                 <div class="message-box">
                     <h2>Warning!</h2>
-                    <p style="color: #ff4545;">JavaScript is required for FORESIGHT to process live I/O.</p>
+                    <p style="color: #ff4545;">JavaScript is required for ARBITER to process live I/O.</p>
                 </div>
             </noscript>
             <!-- error log hidden, unless an error is raised -->
@@ -36,7 +38,7 @@
                     <button class = "collapsible">View Log</button>
                     <div class = "content" style="overflow-x: auto; overflow-y: auto; white-space: nowrap;" id="error-log">
                     </div>
-                    <p class="hint">// Some errors may have additional information not shown in the log, and instead displayed in console.</p>
+                    <p class="hint">// Some errors may have additional information not shown in the log, and are instead displayed in console.</p>
                 </div>
             </div>
             <div class="row">
@@ -52,27 +54,57 @@
                                     <th>Directive</th>
                                     <th>Type</th>
                                     <th>Connected?</th>
-                                    <th>Options</th>
+                                    <th>Select</th>
                                 </tr>
                             </thead>
                             <tbody id="agents-table-content"></tbody>
                         </table>
                     </div>
                     <hr>
-                    <button onclick="addAgent();">+</button>
+                    <div class="button-container">
+                        <button onclick="managerPanelAddAgent();">Connect to New Agent</button>
+                        <button onclick="managerPanelManageDirectives();">Manage Directives</button>
+                    </div>
                 </div>
                 <div class="column card">
                     <h2>Manage</h2>
                     <hr>
                     <p class="hint" id="empty-manage-hint">// Select an agent from the Agents table, or add a new agent, to begin management.</p>
-                    <div id="add-agent">
-                        <p class="hint">// Currently adding a new agent. Enter hostname and press <i>Connect</i>, or <i>Cancel</i>.</p>
+                    <div id="manager-errors"></div>
+                    <div id="add-agent" style="display: none;">
+                        <p class="hint">// Currently adding a new agent. Enter hostname and select <i>Connect</i>, or <i>Cancel</i> to close.</p>
                         <label for="host">Agent Hostname:</label>
                         <input type="text" id="add-agent-input-host" name="host" required>
                         <div class="button-container">
-                            <button onclick="">Connect</button>
-                            <button onclick="" style="color: var(--red);">Cancel</button>
+                            <button onclick="addAgent();" id="add-agent-connect-button">Connect</button>
+                            <!-- 
+                                this doesn't actually cancel the request, it just clears the manager panel,
+                                same for the other panels.
+                            -->
+                            <button onclick="managerPanelClear(false);" style="color: var(--red);" id="add-agent-cancel-button">Cancel</button>
                         </div>
+                        <p id="add-agent-waiting-message" style="display: none;">Processing...</p>
+                    </div>
+                    <div id="selected-agent" style="display: none;">
+                        <p class="hint">// Currently selected an agent. See below for agent details and usage hints.</p>
+                        <div id="selected-agent-data"></div>
+                        <p class="hint">(i) Enter directive and select <i>Apply</i> to issue directives changes.</p>
+                        <hr>
+                        <!-- todo, directives re-assignment and onclick triggers -->
+                        <hr>
+                        <div class="button-container">
+                            <button onclick="" id="selected-agent-stop-directive-button">Stop Directive</button>
+                            <button onclick="" id="selected-agent-start-directive-button">Start Directive</button>
+                            <button onclick="" id="selected-agent-restart-directive-button">Restart Directive</button>
+                        </div>
+                        <p class="hint">(i) Select <i>Cancel</i> to close, and <i>Disconnect</i> to manually disconnect the agent.</p>
+                        <div class="button-container">
+                            <button onclick="managerPanelClear(false);" style="color: var(--red);">Cancel</button>
+                            <button onclick="" style="color: var(--red);" id="selected-agent-disconnect-button">Disconnect</button>
+                        </div>
+                    </div>
+                    <div id="manage-directives" style="display: none;">
+                        
                     </div>
                 </div>
             </div>
@@ -80,16 +112,16 @@
                 var coll = document.getElementsByClassName("collapsible");
                 var i;
                 for (i = 0; i < coll.length; i++) {
-                coll[i].addEventListener("click", function() {
-                    this.classList.toggle("active");
-                    document.getElementsByClassName("collapsible:after").content = "▲";
-                    var content = this.nextElementSibling;
-                    if (content.style.maxHeight){
-                    content.style.maxHeight = null;
-                    } else {
-                    content.style.maxHeight = content.scrollHeight + "px";
-                    }
-                });
+                    coll[i].addEventListener("click", function() {
+                        this.classList.toggle("active");
+                        document.getElementsByClassName("collapsible:after").content = "▲";
+                        var content = this.nextElementSibling;
+                        if (content.style.maxHeight){
+                            content.style.maxHeight = null;
+                        } else {
+                            content.style.maxHeight = content.scrollHeight + "px";
+                        }
+                    });
                 }
             </script>
         </div>

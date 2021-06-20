@@ -8,6 +8,7 @@ td, th, table {
 th {
     font-family: 'Open Sans', sans-serif;
     color: var(--header-color);
+    font-size: 0.75em;
 }
 table {
     width: 100%;

@@ -31,6 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from os.path import splitext, split, isfile
 from os import remove
 from time import sleep
+from typing import Callable, Union
 
 
 class Exceptions:
@@ -54,13 +55,27 @@ class Daemon(swbs.Server):
                  herder_start_on_init: bool = True, herder_workers: int = 2):
         """Application initialization."""
         self.client_tracker = Daemon.ClientTracker(self)
-        self.herder = Daemon.Herder(port, key, key_is_path, network_bits,
+        self.herder = Daemon.Herder(port, key, self, key_is_path, network_bits,
                                     herder_start_on_init, herder_workers)
         self.directives_manager = \
             Daemon.DirectivesManager("/etc/ARBITER/agency.db")
         self.cli_queue_manager = Daemon.CLIQueueManager(self)
         super().__init__(port, key, Daemon.ClientManager, host, key_is_path,
                          no_listen_on_init)
+
+    def get_client_manager_by_uuid(self, uuid: str) \
+            -> Union[Daemon.ClientManager, None]:
+        """
+        Get ClientManager instance by UUID.
+
+        :return: ClientManager instance with matching UUID, None if failed
+        :rtype: Union[Daemon.ClientManager, None]
+        """
+        for client in self.clients:
+            if self.clients[client]["thread"].agent_uuid == \
+                    uuid:
+                return self.clients[client]["thread"]
+        return None
 
     class ClientManager(
             swbs.ServerClientManagers.ClientManagerInstanceExposed):
@@ -82,8 +97,9 @@ class Daemon(swbs.Server):
             self.application_thread = None
             self.event_stop_directive = threading.Event()
             self.event_start_directive = threading.Event()
-            self.agent_uuid = None
-            self.client_type = None
+            self.agent_uuid: str = "None"
+            self.client_type: str = "None"
+            self.is_foresight_updater: bool = False
             super().__init__(instance, connection_socket, client_id)
 
         def process(self) -> None:
@@ -93,14 +109,16 @@ class Daemon(swbs.Server):
             Daemon.ClientManager.send(self, "REQUEST TYPE")
             self.client_type = Daemon.ClientManager.receive(self)
             if self.client_type == "FORESIGHT":
-                # TODO ref point for FORESIGHT dev
-                is_foresight_updater = False
-                COMMAND_LOOKUP = {}
+                self.agent_uuid = "FORESIGHT"
+                COMMAND_LOOKUP = {
+                    "ADD_AGENT": lambda: self.payload_handler(
+                        Daemon.Herder.herd_target, self.instance.herder)
+                }
                 while True:
-                    if is_foresight_updater is False:
+                    if self.is_foresight_updater is False:
                         request = Daemon.ClientManager.receive(self)
                         if request == "UPDATE":
-                            is_foresight_updater = True
+                            self.is_foresight_updater = True
                             Daemon.ClientManager.send(self, "OK")
                             continue
                         try:
@@ -109,11 +127,22 @@ class Daemon(swbs.Server):
                         except KeyError:
                             Daemon.ClientManager.send(self, "KEYERROR")
                     else:
-                        while self.instance.directives_manager.\
-                                directives_updated_event.is_set() is False \
-                                or self.instance.client_tracker.\
-                                connected_uuids_update_event.is_set() is False:
+                        while True not in [self.instance.directives_manager.
+                                           directives_updated_event.is_set(),
+                                           self.instance.client_tracker.
+                                           connected_uuids_update_event.
+                                           is_set(), self.instance.herder.
+                                           add_agent_outcome_event.is_set()]:
                             pass
+                        if self.instance.herder.add_agent_outcome_event.\
+                                is_set() is True:
+                            Daemon.ClientManager.send(self, "add-agent STATE")
+                            Daemon.ClientManager.receive(self)
+                            Daemon.ClientManager.send(
+                                self, str(self.instance.herder.
+                                          add_agent_outcome).lower())
+                            self.instance.herder.add_agent_outcome_event.\
+                                clear()
                         table_contents = self.instance.directives_manager.\
                             get_all_agents()
                         for index in range(len(table_contents)):
@@ -232,6 +261,21 @@ class Daemon(swbs.Server):
             return Daemon.receive(self.instance, buffer_size,
                                   self.connection_socket, return_bytes)
 
+        def payload_handler(self, target: Callable, target_instance) -> None:
+            """
+            Handle payload requests from the web front-end.
+
+            :param target: function to call with payload data
+            :type target: Callable
+            :param target_instance: instance parameter to call target with,
+                set None for no instance parameter
+            """
+            Daemon.ClientManager.send(self, "OK")
+            if target_instance is None:
+                target(Daemon.ClientManager.receive(self))
+            else:
+                target(target_instance, Daemon.ClientManager.receive(self))
+
     class ClientTracker:
         """With every client connection, processes client dictionary to \
             procure a list with the UUIDs of all agents connected to the \
@@ -269,8 +313,12 @@ class Daemon(swbs.Server):
                 self.client_connect_event.wait()
                 self.connected_uuids.clear()
                 for client in self.outer_self.clients:
+                    if self.outer_self.clients[client]["threading"].\
+                            agent_uuid == "FORESIGHT":
+                        continue
                     self.connected_uuids.append(
-                        self.outer_self.clients[client]["threading"].uuid)
+                        self.outer_self.clients[client]["threading"].
+                        agent_uuid)
                 self.client_connect_event.clear()
                 self.connected_uuids_update_event.set()
 
@@ -278,9 +326,11 @@ class Daemon(swbs.Server):
         """Searches for lost agents, as a shepard would find lost sheep."""
 
         def __init__(self, port: int, key: Union[str, bytes, None],
-                     key_is_path: bool = False, bits: Union[None, int] = 24,
-                     start_on_init: bool = True, workers: int = 2):
+                     outer_self: Daemon, key_is_path: bool = False,
+                     bits: Union[None, int] = 24, start_on_init: bool = True,
+                     workers: int = 2):
             """Thread initialization."""
+            self.outer_self = outer_self
             host = "0.0.0.0"
             super().__init__(host, port, key, key_is_path)
             if bits not in range(0, 25):
@@ -298,9 +348,12 @@ class Daemon(swbs.Server):
                         self.bits = LOOKUP[classes]
                         break
                 self.bits = 24
+            self.client_lock = threading.Lock()
+            self.add_agent_outcome: bool = False
+            self.add_agent_outcome_event = threading.Event()
             self.thread_pool = \
                 ThreadPoolExecutor(workers, "arbiter_daemon_herder_thread_")
-            self.thread_kill_flag = False
+            self.thread_kill_flag: bool = False
             if start_on_init is True:
                 Daemon.Herder.start(self)
 
@@ -333,6 +386,7 @@ class Daemon(swbs.Server):
                                                   str(self.bits))
                 results.pop("stats")
                 results.pop("runtime")
+                self.client_lock.acquire(True)
                 for result in list(results.keys()):
                     self.host = result
                     try:
@@ -345,6 +399,31 @@ class Daemon(swbs.Server):
                             Daemon.Herder.disconnect(self)
                     except BaseException:
                         Daemon.Herder.disconnect(self)
+                self.client_lock.release()
+
+        def herd_target(self, target: str) -> None:
+            """
+            Attempt to refer specific host to ARBITER.
+
+            :param target: hostname of target
+            :type target: str
+            """
+            self.client_lock.acquire(True)
+            self.add_agent_outcome = False
+            try:
+                self.host = target
+                Daemon.Herder.connect(self)
+                if Daemon.Herder.receive(self) == \
+                        "KINETIC WAITING FOR CONTROLLER":
+                    Daemon.Herder.send(self, "POINT " +
+                                       socket.gethostname() + ".local")
+                    self.add_agent_outcome = True
+                else:
+                    Daemon.Herder.disconnect(self)
+            except BaseException:
+                Daemon.Herder.disconnect(self)
+            self.client_lock.release()
+            self.add_agent_outcome_event.set()
 
     class DirectivesManager:
         """SQLite3 database manager, that handles I/O operations to and from \
@@ -598,14 +677,16 @@ class Daemon(swbs.Server):
                                                      "directive_path":
                                                          components[3]}),
                                       "directive_start":
-                                          lambda: Daemon.CLIQueueManager.
-                                          interface_client_managers(
-                                              self, components[1]).
+                                          lambda: Daemon.
+                                          get_client_manager_by_uuid(
+                                              self.outer_self,
+                                              components[1]).
                                           event_start_directive.set(),
                                           "directive_stop":
-                                              lambda: Daemon.CLIQueueManager.
-                                              interface_client_managers(
-                                                  self, components[1]).
+                                              lambda: Daemon.
+                                              get_client_manager_by_uuid(
+                                                  self.outer_self,
+                                                  components[1]).
                                               event_stop_directive.set()}
                             LOOKUP[components[0]]()
                     with open("/etc/ARBITER/queue", "w") as \
@@ -615,13 +696,3 @@ class Daemon(swbs.Server):
                             "get dumped here for ARBITER to parse. "
                             "Robots only.")
                     remove("/etc/ARBITER/queue_lock")
-
-        def interface_client_managers(self, uuid: str) -> object:
-            """
-            Get ClientManager instance by UUID.
-
-            :return: object, ClientManager
-            """
-            for client in self.outer_self.clients:
-                if self.outer_self.clients[client]["thread"].uuid == uuid:
-                    return self.outer_self.clients[client]["thread"]
