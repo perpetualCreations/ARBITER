@@ -18,20 +18,26 @@ Probably flexible enough for daemons to be modularized into separate server \
 Probably.
 """
 
-import swbs
-import socket
-import nmap3
 import sqlite3
+import socket
 import sys
 import threading
 from hashlib import md5
-from typing import Union
-from ipaddress import IPv4Address, IPv4Network
-from concurrent.futures import ThreadPoolExecutor
-from os.path import splitext, split, isfile
-from os import remove
-from time import sleep
 from typing import Callable, Union
+from os import remove, listdir, path
+from time import sleep
+from concurrent.futures import ThreadPoolExecutor
+from ipaddress import IPv4Address, IPv4Network
+import nmap3
+import swbs
+
+NETWORK_CLASSES = [IPv4Network(("10.0.0.0", "255.0.0.0")),
+                   IPv4Network(("172.16.0.0", "255.240.0.0")),
+                   IPv4Network(("192.168.0.0", "255.255.0.0"))]
+LOOKUP_NETWORK_CLASS_TO_BITS = {NETWORK_CLASSES[0]: 8, NETWORK_CLASSES[1]: 16,
+                                NETWORK_CLASSES[2]: 24}
+LOOKUP_BITS_TO_NETWORK_CLASS = {8: "10.0.0.0", 16: "172.16.0.0",
+                                24: "192.168.0.0"}
 
 
 class Exceptions:
@@ -110,7 +116,7 @@ class Daemon(swbs.Server):
             self.client_type = Daemon.ClientManager.receive(self)
             if self.client_type == "FORESIGHT":
                 self.agent_uuid = "FORESIGHT"
-                COMMAND_LOOKUP = {
+                commands = {
                     "ADD_AGENT": lambda: self.payload_handler(
                         Daemon.Herder.herd_target, self.instance.herder)
                 }
@@ -123,7 +129,7 @@ class Daemon(swbs.Server):
                             continue
                         try:
                             Daemon.ClientManager.send(self, str(
-                                COMMAND_LOOKUP[request]()))
+                                commands[request]()))
                         except KeyError:
                             Daemon.ClientManager.send(self, "KEYERROR")
                     else:
@@ -145,7 +151,7 @@ class Daemon(swbs.Server):
                                 clear()
                         table_contents = self.instance.directives_manager.\
                             get_all_agents()
-                        for index in range(len(table_contents)):
+                        for index, _dummy in enumerate(table_contents):
                             # remove numeric id column
                             table_contents[index].remove(0)
                             # index 0 now is the UUID column
@@ -184,7 +190,7 @@ class Daemon(swbs.Server):
                     parse_directives(self.agent_uuid)
                 if directives is None:
                     return
-                elif type(directives) is list:
+                elif isinstance(directives, list) is True:
                     index = 0
                     while index > len(directives):
                         if self.event_stop_directive.is_set() is True:
@@ -337,17 +343,12 @@ class Daemon(swbs.Server):
                 bits = None
             self.bits = bits
             if bits is None:
-                NETWORK_CLASSES = [IPv4Network(("10.0.0.0", "255.0.0.0")),
-                                   IPv4Network(("172.16.0.0", "255.240.0.0")),
-                                   IPv4Network(("192.168.0.0", "255.255.0.0"))]
-                LOOKUP = {NETWORK_CLASSES[0]: 8, NETWORK_CLASSES[1]: 16,
-                          NETWORK_CLASSES[2]: 24}
+                self.bits = 24
                 for classes in NETWORK_CLASSES:
                     if IPv4Address(socket.gethostbyname(socket.gethostname()
                                                         )) in classes:
-                        self.bits = LOOKUP[classes]
+                        self.bits = LOOKUP_NETWORK_CLASS_TO_BITS[classes]
                         break
-                self.bits = 24
             self.client_lock = threading.Lock()
             self.add_agent_outcome: bool = False
             self.add_agent_outcome_event = threading.Event()
@@ -380,15 +381,16 @@ class Daemon(swbs.Server):
             """Scan for lost agents with NMAP, and signal them to a \
                 controller."""
             mapper = nmap3.NmapHostDiscovery()
-            LOOKUP = {8: "10.0.0.0", 16: "172.16.0.0", 24: "192.168.0.0"}
             while self.thread_kill_flag is False:
-                results = mapper.nmap_no_portscan(LOOKUP[self.bits] + "/" +
-                                                  str(self.bits))
+                results = mapper.nmap_no_portscan(
+                    LOOKUP_BITS_TO_NETWORK_CLASS[self.bits] + "/" +
+                    str(self.bits))
                 results.pop("stats")
                 results.pop("runtime")
                 self.client_lock.acquire(True)
                 for result in list(results.keys()):
                     self.host = result
+                    # pylint: disable=broad-except
                     try:
                         Daemon.Herder.connect(self)
                         if Daemon.Herder.receive(self) == \
@@ -418,16 +420,19 @@ class Daemon(swbs.Server):
                     Daemon.Herder.send(self, "POINT " +
                                        socket.gethostname() + ".local")
                     self.add_agent_outcome = True
-                else:
-                    Daemon.Herder.disconnect(self)
+            # more warcrimes!
+            # pylint: disable=broad-except
             except BaseException:
+                pass
+            finally:
                 Daemon.Herder.disconnect(self)
             self.client_lock.release()
             self.add_agent_outcome_event.set()
 
     class DirectivesManager:
         """SQLite3 database manager, that handles I/O operations to and from \
-            the directives database."""
+            the directives database. Also tracks directives in the \
+                /etc/ARBITER/directives/ directory."""
 
         def __init__(self, file: str):
             """Initialize Manager class."""
@@ -503,11 +508,10 @@ class Daemon(swbs.Server):
                                     directive_path + ", " + directive_type +
                                     ")", {"null": None})
                 self.connection.commit()
-            except sqlite3.OperationalError as ParentException:
-                raise Exceptions.DirectivesManagerException("Failed to add "
-                                                            "entry for (UUID) "
-                                                            + uuid + ".") \
-                    from ParentException
+            except sqlite3.OperationalError as parent_exception:
+                raise Exceptions.DirectivesManagerException(
+                    "Failed to add entry for (UUID) " + uuid + ".") \
+                        from parent_exception
             self.directives_updated_event.set()
 
         def remove_agent(self, uuid: str) -> None:
@@ -525,10 +529,10 @@ class Daemon(swbs.Server):
                 self.cursor.execute("DELETE FROM agents WHERE uuid = '" + uuid
                                     + "'")
                 self.connection.commit()
-            except sqlite3.OperationalError as ParentException:
+            except sqlite3.OperationalError as parent_exception:
                 raise Exceptions.DirectivesManagerException(
                     "Failed to remove agent entry for (UUID) " + uuid + ".") \
-                        from ParentException
+                        from parent_exception
             self.directives_updated_event.set()
 
         def edit_agent(self, uuid: str, mod: dict) -> None:
@@ -568,10 +572,10 @@ class Daemon(swbs.Server):
                                     " WHERE uuid = '" + uuid + "';",
                                     {"null": None})
                 self.connection.commit()
-            except sqlite3.OperationalError as ParentException:
+            except sqlite3.OperationalError as parent_exception:
                 raise Exceptions.DirectivesManagerException(
                     "Failed to edit agent entry for (UUID) " + uuid + ".") \
-                    from ParentException
+                    from parent_exception
             self.directives_updated_event.set()
 
         def get_agent(self, uuid: str) -> tuple:
@@ -595,7 +599,7 @@ class Daemon(swbs.Server):
             :return: database row for agent entry
             :rtype: list
             """
-            return self.cursor.execute("SELECT * FROM agents").fetchall()
+            return list(self.cursor.execute("SELECT * FROM agents").fetchall())
 
         def parse_directives(self, uuid: str) -> Union[list, object, None]:
             """
@@ -615,24 +619,23 @@ class Daemon(swbs.Server):
             if entry is None:
                 raise Exceptions.DirectivesManagerException(
                     "Entry for (UUID) " + uuid + " does not exist.")
-            if entry[2] is None or entry[3] is None:
-                return None
-            if entry[3] == "SCRIPT":
-                # noinspection PyBroadException
-                try:
-                    with open(entry[2]) as script_handle:
-                        return script_handle.read().split("\n")
-                except BaseException as ParentException:
-                    raise Exceptions.DirectivesManagerException(
-                        "Failed to interpret script directive.") \
-                        from ParentException
-            if entry[3] == "APPLICATION":
-                sys.path.append(split(entry[2])[0])
-                target = None
-                # FIXME application script importing
-                exec("import " + splitext(split(entry[2])[1])[0] +
-                     " as target")
-                return target
+            if entry[2] is not None:
+                if entry[3] == "SCRIPT":
+                    # noinspection PyBroadException
+                    try:
+                        with open(entry[2]) as script_handle:
+                            return script_handle.read().split("\n")
+                    except BaseException as parent_exception:
+                        raise Exceptions.DirectivesManagerException(
+                            "Failed to interpret script directive.") \
+                            from parent_exception
+                elif entry[3] == "APPLICATION":
+                    sys.path.append(path.split(entry[2])[0])
+                    target = None
+                    # FIXME application script importing
+                    exec("import " + path.splitext(path.split(entry[2])[1])[0]
+                         + " as target")
+                    return target
 
     class CLIQueueManager:
         """Manages incoming commands from /etc/ARBITER/queue."""
@@ -655,7 +658,7 @@ class Daemon(swbs.Server):
         def process(self) -> None:
             """Process through queue contents."""
             while True:
-                if isfile("/etc/ARBITER/queue_lock") is True:
+                if path.isfile("/etc/ARBITER/queue_lock") is True:
                     sleep(1)
                 else:
                     with open("/etc/ARBITER/queue_lock") as lock_handler:
@@ -667,28 +670,21 @@ class Daemon(swbs.Server):
                             if command[:3] == "-#-":
                                 continue
                             components = command.split("<#>")
-                            LOOKUP = {"directive_assign": lambda: self.
-                                      outer_self.directives_manager.
-                                      edit_agent(self.outer_self.
-                                                 directives_manager,
-                                                 components[1],
-                                                 {"directive_type":
-                                                     components[2],
-                                                     "directive_path":
-                                                         components[3]}),
-                                      "directive_start":
-                                          lambda: Daemon.
-                                          get_client_manager_by_uuid(
-                                              self.outer_self,
-                                              components[1]).
-                                          event_start_directive.set(),
-                                          "directive_stop":
-                                              lambda: Daemon.
-                                              get_client_manager_by_uuid(
-                                                  self.outer_self,
-                                                  components[1]).
-                                              event_stop_directive.set()}
-                            LOOKUP[components[0]]()
+                            execute = {"directive_assign": self.outer_self.
+                                       directives_manager.edit_agent(
+                                           self.outer_self.directives_manager,
+                                           components[1],
+                                           {"directive_type": components[2],
+                                            "directive_path": components[3]}),
+                                       "directive_start": Daemon.
+                                       get_client_manager_by_uuid(
+                                           self.outer_self, components[1]).
+                                       event_start_directive.set(),
+                                       "directive_stop": Daemon.
+                                       get_client_manager_by_uuid(
+                                           self.outer_self, components[1]).
+                                       event_stop_directive.set()}
+                            execute[components[0]]()
                     with open("/etc/ARBITER/queue", "w") as \
                             queue_overwrite_handler:
                         queue_overwrite_handler.write(

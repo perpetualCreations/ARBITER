@@ -17,11 +17,12 @@ cli.py, adds commands to /etc/ARBITER/queue for the main application instance \
     to process.
 """
 
+# pylint: disable=redefined-builtin
+
 import argparse
 import sqlite3
-from os.path import isfile
 from sys import exit
-from os import remove
+from os import remove, path
 
 parser = argparse.ArgumentParser()
 parser.add_argument("operation", help="Operation to be committed to queue for "
@@ -66,7 +67,7 @@ if arguments.operation == "directive_assign":
                         " that requires it! Specify arguments with --type and "
                         "--path.")
     else:
-        if isfile(arguments.path) is False:
+        if path.isfile(arguments.path) is False:
             raise FileNotFoundError("Directive ", arguments.path,
                                     " does not exist.")
         arguments.type += "<#>"
@@ -75,7 +76,7 @@ else:
     arguments.type = ""
     arguments.path = ""
 
-while isfile("/etc/ARBITER/queue_lock") is True:
+while path.isfile("/etc/ARBITER/queue_lock") is True:
     # block execution until queue lock is freed
     pass
 

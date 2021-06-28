@@ -30,10 +30,10 @@ socket.on("eventUpdate", data => {
             if (data["id"] == "agents-table-content") {
                 // add select button to all agents
                 tableRow.innerHTML += ('<td><button onclick="' + "select('" + data["data"][row][0] + "');" + '">Select</button></td>'); 
-                document.getElementById(data["id"]).appendChild(tableRow);
                 // when table content is for agents, cache into variable
                 tableDataCache = data["data"];
             }
+            document.getElementById(data["id"]).appendChild(tableRow);
         }
     }
 });

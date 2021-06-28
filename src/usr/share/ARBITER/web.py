@@ -16,17 +16,17 @@ Made by perpetualCreations
 web.py, handles running the web management application.
 """
 
-import flask
-import flask_login
-import flask_socketio
 import configparser
 import json
-import swbs
 import threading
 from os import urandom
 from ast import literal_eval
 from hashlib import sha3_512
 from datetime import datetime, timezone
+import flask
+import flask_login
+import flask_socketio
+import swbs
 
 
 config = configparser.ConfigParser()
@@ -69,6 +69,8 @@ class User(flask_login.UserMixin):
 def user_loader(user_id) -> User:
     """Flask Login function required for loading the admin user."""
     user = User()
+    # pylint: disable=attribute-defined-outside-init
+    # pylint: disable=invalid-name
     user.id = user_id
     return user
 
@@ -100,6 +102,7 @@ class InterfaceClient(swbs.Client):
 
         Has additional calls to specify ARIA protocol.
         """
+        # pylint: disable=broad-except
         try:
             self.connect()
             type_request = self.receive()
@@ -120,17 +123,21 @@ class InterfaceClient(swbs.Client):
                 print(error_string)
                 log_error_broadcaster(error_string)
                 self.dead = True
-        except Exception as ParentException:
+        except BaseException as parent_exception:
             error_string = "Failed to initialize interface host " + \
                 "connecting to " + self.host + " on port " + str(self.port) + \
                 ". Interface client will shutdown."
-            print(str(ParentException) + " -> " + error_string)
+            print(str(parent_exception) + " -> " + error_string)
             log_error_broadcaster(error_string)
             self.dead = True
 
 
 def update_listener() -> None:
     """Thread for update events issued by the main ARBITER server."""
+    # probably a warcrime
+    # pylint: disable=global-statement
+    # pylint: disable=invalid-name
+    global directives_database_cache
     set_update = False
     arbiter_updater_interface = \
         InterfaceClient("127.0.0.1", arbiter_config["server"]["port"],
@@ -159,11 +166,12 @@ def update_listener() -> None:
             update_content_data = \
                 arbiter_updater_interface.receive()
             if update_header_data[1] == "TABLE":
+                # pylint: disable=broad-except
                 try:
                     update_content_data = literal_eval(update_content_data)
-                except Exception as ParentException:
+                except BaseException as parent_exception:
                     error_string = "Table data could not be interpreted, " + \
-                        "raised exception: " + str(ParentException)
+                        "raised exception: " + str(parent_exception)
                     print(error_string)
                     log_error_broadcaster(error_string)
                     return None
@@ -254,19 +262,15 @@ def change_password() -> any:
     elif flask.request.method == "POST":
         if flask.request.form["password"] == \
                 flask.request.form["password_affirm"]:
-            config["CORE"]["PASSWORD"
-                           ] = sha3_512(
-                               flask.request.form["password"
-                                                  ].encode("ascii")
-                                                  ).hexdigest()
+            config["CORE"]["PASSWORD"] = sha3_512(
+                flask.request.form["password"].encode("ascii")).hexdigest()
             with open("main.cfg", "wb") as config_overwrite:
                 config.write(config_overwrite)
             return flask.redirect(flask.url_for("index"))
         else:
-            return flask.render_template("change_password.html",
-                                         serverid=config["CORE"]["ID"],
-                                         error="Passwords don't match.",
-                                         form=flask.request.form)
+            return flask.render_template(
+                "change_password.html", serverid=config["CORE"]["ID"],
+                error="Passwords don't match.", form=flask.request.form)
     else:
         flask.abort(405)
 
@@ -295,6 +299,7 @@ def login() -> any:
         if sha3_512(flask.request.form["password"].encode("ascii", "replace")
                     ).hexdigest() == config["CORE"]["PASSWORD"]:
             user = User()
+            # pylint: disable=attribute-defined-outside-init
             user.id = users["username"]
             flask_login.login_user(user)
             return flask.redirect(flask.url_for("index"))
