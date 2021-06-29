@@ -23,14 +23,16 @@ import socket
 import sys
 import threading
 from hashlib import md5
-from typing import Callable, Union
-from os import remove, listdir, path
+from typing import Callable, Union, Literal
+from os import remove, path, rename
 from time import sleep
 from concurrent.futures import ThreadPoolExecutor
 from ipaddress import IPv4Address, IPv4Network
+from subprocess import call
 import nmap3
 import swbs
 
+# constants, mostly for lookups.
 NETWORK_CLASSES = [IPv4Network(("10.0.0.0", "255.0.0.0")),
                    IPv4Network(("172.16.0.0", "255.240.0.0")),
                    IPv4Network(("192.168.0.0", "255.255.0.0"))]
@@ -38,6 +40,8 @@ LOOKUP_NETWORK_CLASS_TO_BITS = {NETWORK_CLASSES[0]: 8, NETWORK_CLASSES[1]: 16,
                                 NETWORK_CLASSES[2]: 24}
 LOOKUP_BITS_TO_NETWORK_CLASS = {8: "10.0.0.0", 16: "172.16.0.0",
                                 24: "192.168.0.0"}
+LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION = {"SCRIPT": ".txt",
+                                           "APPLICATION": ".py"}
 
 
 class Exceptions:
@@ -46,8 +50,8 @@ class Exceptions:
     class ClientManagerException(BaseException):
         """A Daemon.ClientManager thread has raised a general exception."""
 
-    class DirectivesManagerException(BaseException):
-        """A Daemon.DirectivesManager instance has raised a \
+    class DatabaseManagerException(BaseException):
+        """A Daemon.DatabaseManager instance has raised a \
             general exception."""
 
 
@@ -63,8 +67,8 @@ class Daemon(swbs.Server):
         self.client_tracker = Daemon.ClientTracker(self)
         self.herder = Daemon.Herder(port, key, self, key_is_path, network_bits,
                                     herder_start_on_init, herder_workers)
-        self.directives_manager = \
-            Daemon.DirectivesManager("/etc/ARBITER/agency.db")
+        self.database_manager = \
+            Daemon.DatabaseManager("/etc/ARBITER/agency.db")
         self.cli_queue_manager = Daemon.CLIQueueManager(self)
         super().__init__(port, key, Daemon.ClientManager, host, key_is_path,
                          no_listen_on_init)
@@ -133,8 +137,8 @@ class Daemon(swbs.Server):
                         except KeyError:
                             Daemon.ClientManager.send(self, "KEYERROR")
                     else:
-                        while True not in [self.instance.directives_manager.
-                                           directives_updated_event.is_set(),
+                        while True not in [self.instance.database_manager.
+                                           database_updated_event.is_set(),
                                            self.instance.client_tracker.
                                            connected_uuids_update_event.
                                            is_set(), self.instance.herder.
@@ -149,7 +153,7 @@ class Daemon(swbs.Server):
                                           add_agent_outcome).lower())
                             self.instance.herder.add_agent_outcome_event.\
                                 clear()
-                        table_contents = self.instance.directives_manager.\
+                        table_contents = self.instance.database_manager.\
                             get_all_agents()
                         for index, _dummy in enumerate(table_contents):
                             # remove numeric id column
@@ -166,8 +170,8 @@ class Daemon(swbs.Server):
                         Daemon.ClientManager.receive(self)
                         Daemon.ClientManager.send(
                             self, str(table_contents))
-                        self.instance.directives_manager.\
-                            directives_updated_event.clear()
+                        self.instance.database_manager.\
+                            database_updated_event.clear()
                         self.instance.client_tracker.\
                             connected_uuids_update_event.clear()
             elif self.client_type == "KINETIC":
@@ -182,11 +186,11 @@ class Daemon(swbs.Server):
             Daemon.ClientManager.send(self, "REQUEST UUID")
             self.agent_uuid = self.instance.network.receive(
                 socket_instance=self.connection_socket)
-            if self.instance.directives_manager.get_agent(
+            if self.instance.database_manager.get_agent(
                     self.agent_uuid) is None:
-                self.instance.directives_manager.add_agent(self.agent_uuid)
+                self.instance.database_manager.add_agent(self.agent_uuid)
             else:
-                directives = self.instance.directives_manager.\
+                directives = self.instance.database_manager.\
                     parse_directives(self.agent_uuid)
                 if directives is None:
                     return
@@ -429,10 +433,8 @@ class Daemon(swbs.Server):
             self.client_lock.release()
             self.add_agent_outcome_event.set()
 
-    class DirectivesManager:
-        """SQLite3 database manager, that handles I/O operations to and from \
-            the directives database. Also tracks directives in the \
-                /etc/ARBITER/directives/ directory."""
+    class DatabaseManager:
+        """SQLite3 database manager, that handles I/O operations."""
 
         def __init__(self, file: str):
             """Initialize Manager class."""
@@ -443,12 +445,20 @@ class Daemon(swbs.Server):
             except sqlite3.OperationalError:
                 self.cursor.execute("CREATE TABLE agents (nid INTEGER NOT NULL"
                                     " PRIMARY KEY AUTOINCREMENT, uuid TEXT "
-                                    "NOT NULL, name TEXT, directive_path TEXT,"
-                                    " directive_type TEXT)")
+                                    "NOT NULL, name TEXT, directive_id "
+                                    "INTEGER)")
                 self.connection.commit()
-            self.directives_updated_event = threading.Event()
+            try:
+                self.cursor.execute("SELECT * FROM directives")
+            except sqlite3.OperationalError:
+                self.cursor.execute("CREATE TABLE directives (nid INTEGER NOT "
+                                    "NULL PRIMARY KEY AUTOINCREMENT, name TEXT"
+                                    " NOT NULL, type TEXT NOT NULL, pypi BOOL "
+                                    "NOT NULL)")
+                self.connection.commit()
+            self.database_updated_event = threading.Event()
             # set on init so table population occurs upon first connect
-            self.directives_updated_event.set()
+            self.database_updated_event.set()
 
         @staticmethod
         def sanitize(uuid: str) -> str:
@@ -469,8 +479,7 @@ class Daemon(swbs.Server):
                 uuid = md5(uuid.encode("ascii")).hexdigest()
             return uuid
 
-        def add_agent(self, uuid: str, directive_type: Union[str, None] = None,
-                      directive_path: Union[str, None] = None) -> None:
+        def add_agent(self, uuid: str, directive: Union[int, None]) -> None:
             """
             Add agent to database. If agent already exists, overwrites.
 
@@ -479,40 +488,70 @@ class Daemon(swbs.Server):
                 non-standard UUIDs that disobey this specification will be
                 normalized through MD5 hashing
             :type uuid: str
-            :param directive_type: type of directive, valid types are
-                SCRIPT and APPLICATION, if None no directive is registered,
-                and no directive will be assigned to the agent, has
-                cross-dependency with directive_path requiring both to be not
-                None and defined to have a record registered, default None
-            :type directive_type: str
-            :param directive_path: path to directive, being Python module
-                or script text file, if None no directive is registered, and
-                no directive will be assigned to the agent, has
-                cross-dependency with directive_path requiring both to be not
-                None and defined to have a record registered, default None
-            :type directive_path: str
+            :param directive: numeric ID of directive for agent to be assigned
+                to, or None for agent to not be assigned initially to any
+                known directive
+            :type directive: Union[int, None]
             """
-            uuid = "'" + Daemon.DirectivesManager.sanitize(uuid) + "'"
-            if directive_path is None or directive_type is None:
-                directive_path = ":null"
-                directive_type = ":null"
-            else:
-                directive_path = "'" + directive_path + "'"
-                directive_type = "'" + directive_type + "'"
+            uuid = self.sanitize(uuid)
             try:
-                if Daemon.DirectivesManager.get_agent(self, uuid) is None:
+                if self.get_agent(uuid) is None:
                     self.cursor.execute("DELETE FROM agents WHERE uuid = " +
                                         uuid)
-                self.cursor.execute("INSERT INTO agents (uuid, directive_path,"
-                                    "directive_type) VALUES (" + uuid + ", " +
-                                    directive_path + ", " + directive_type +
-                                    ")", {"null": None})
+                self.cursor.execute("INSERT INTO agents (uuid, directive_id) "
+                                    "VALUES (:uuid, :directive)",
+                                    {"uuid": uuid, "directive": directive})
                 self.connection.commit()
             except sqlite3.OperationalError as parent_exception:
-                raise Exceptions.DirectivesManagerException(
+                raise Exceptions.DatabaseManagerException(
                     "Failed to add entry for (UUID) " + uuid + ".") \
                         from parent_exception
-            self.directives_updated_event.set()
+            self.database_updated_event.set()
+
+        def add_directive(self, name: str, content: str,
+                          directive_type: Literal["SCRIPT", "APPLICATION"],
+                          is_pypi: bool) -> None:
+            """
+            Add directive with given parameters.
+
+            Will add both a database entry script file,
+            or PIP application installation.
+
+            :param name: name of directive, must be a valid filename unless
+                parameter is_pypi is True, in which case this parameter should
+                be the application package name to be installed from PyPI
+            :type name: str
+            :param content: content of directive script or application, unless
+                parameter is_pypi is True, in which case this parameter should
+                be the application import name (ran through python -m)
+            :type content: str
+            :param directive_type: type of directive, valid types are SCRIPT
+                and APPLICATION
+            :type directive_type: Literal["SCRIPT", "APPLICATION"]
+            :param is_pypi: whether directive is to be installed from PyPI,
+                only is effective if directive_type is APPLICATION.
+            :type is_pypi: bool
+            """
+            if is_pypi is True and directive_type != "APPLICATION":
+                is_pypi = False
+            try:
+                self.cursor.execute("INSERT INTO directives (name, type, pypi)"
+                                    " VALUES (:name, :type, :pypi)",
+                                    {"name": name, "type": directive_type,
+                                     "pypi": is_pypi})
+                self.connection.commit()
+            except sqlite3.OperationalError as parent_exception:
+                raise Exceptions.DatabaseManagerException(
+                    "Failed to add entry for (directive) " + name + ".") \
+                        from parent_exception
+            if is_pypi is False:
+                with open("/etc/ARBITER/directives/" + name +
+                          LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
+                              directive_type], "w") as directive_file_handle:
+                    directive_file_handle.write(content)
+            else:
+                call("sudo pip install " + name, shell=True)
+            self.database_updated_event.set()
 
         def remove_agent(self, uuid: str) -> None:
             """
@@ -524,16 +563,36 @@ class Daemon(swbs.Server):
                 normalized through MD5 hashing
             :type uuid: str
             """
-            uuid = Daemon.DirectivesManager.sanitize(uuid)
+            uuid = self.sanitize(uuid)
             try:
-                self.cursor.execute("DELETE FROM agents WHERE uuid = '" + uuid
-                                    + "'")
+                self.cursor.execute(
+                    "DELETE FROM agents WHERE uuid=:uuid", {"uuid": uuid})
                 self.connection.commit()
             except sqlite3.OperationalError as parent_exception:
-                raise Exceptions.DirectivesManagerException(
+                raise Exceptions.DatabaseManagerException(
                     "Failed to remove agent entry for (UUID) " + uuid + ".") \
                         from parent_exception
-            self.directives_updated_event.set()
+            self.database_updated_event.set()
+
+        def remove_directive(self, nid: int) -> None:
+            """
+            Remove directive by integer ID.
+
+            Will delete both its database entry and script file,
+            or PIP application installation.
+
+            :param nid: numeric ID number of the directive
+            :type nid: int
+            """
+            if self.get_directive(nid)[3] == 0:
+                remove("/etc/ARBITER/directives/" + self.get_directive(nid)[1]
+                       + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
+                           self.get_directive(nid)[2]])
+            else:
+                call("sudo pip uninstall " + self.get_directive(nid)[1],
+                     shell=True)
+            self.cursor.execute("DELETE FROM directives WHERE nid=:nid",
+                                {"nid": nid})
 
         def edit_agent(self, uuid: str, mod: dict) -> None:
             """
@@ -541,65 +600,133 @@ class Daemon(swbs.Server):
 
             :param uuid: agent UUID, must be alphanumeric, hyphens/dashes
                 are allowed, no spaces (as standard UUIDs should be),
-                non-standard UUIDs that disobey thisspecification will be
+                non-standard UUIDs that disobey this specification will be
                 normalized through MD5 hashing
             :type uuid: str
             :param mod: should contain modifications to agent row, specify
-                "uuid", "directive_path", "directive_type", and/or "name",
-                (case-sensitive) as keys being the columns to be overwritten,
-                the output assigned to keys being the new value of the column,
-                example {"directive_path":"/home/hokma/directives.txt"}, to
-                clear directive_path or directive_type set them to "NULL" or
-                None
+                "uuid", "directive_id", and/or "name", (case-sensitive) as keys
+                being the columns to be overwritten, the values attached to
+                keys being the new value of the column, to clear directive or
+                name set them to None
             :type mod: dict
             """
-            uuid = Daemon.DirectivesManager.sanitize(uuid)
-            # piped into SQL execution
-            settings = ""
-            for column in mod:
-                if column not in ["uuid", "directive_path", "directive_type",
-                                  "name"]:
-                    mod.pop(column)
-                    continue
-                if column in ["directive_path", "directive_type", "name"] and \
-                        mod[column] in ["NULL", None]:
-                    settings += column + " = :null, "
-                    continue
-                settings += column + " = '" + mod[column] + "', "
-            settings = settings.rstrip(", ")
+            uuid = self.sanitize(uuid)
             try:
-                self.cursor.execute("UPDATE agents SET " + settings +
-                                    " WHERE uuid = '" + uuid + "';",
-                                    {"null": None})
+                for key in mod:
+                    self.cursor.execute(
+                        "UPDATE agents SET " + key + "=:value" +
+                        " WHERE uuid=:uuid", {"uuid": uuid, "value": mod[key]})
                 self.connection.commit()
             except sqlite3.OperationalError as parent_exception:
-                raise Exceptions.DirectivesManagerException(
+                raise Exceptions.DatabaseManagerException(
                     "Failed to edit agent entry for (UUID) " + uuid + ".") \
                     from parent_exception
-            self.directives_updated_event.set()
+            self.database_updated_event.set()
+
+        def edit_directive(self, nid: int, mod: dict) -> None:
+            """
+            Edit directive in database.
+
+            :param nid: numeric ID of directive
+            :type nid: str
+            :param mod: should contain modifications to agent row, specify
+                "name", "type", and/or "pypi", (case-sensitive) as keys
+                being the columns to be overwritten, the values attached to
+                keys being the new value of the column, columns cannot be
+                cleared and pypi cannot be set to True unless type is also
+                APPLICATION
+            :type mod: dict
+            """
+            # usually variables are used conservatively.
+            # however this function, using only returns for data,
+            # would consume an abhorrent amount of I/O bandwidth.
+            previous_row = self.get_directive(nid)
+            if mod.get("pypi") is True:
+                if mod.get("type") != "APPLICATION":
+                    mod["pypi"] = False
+                else:
+                    if previous_row[2] != "APPLICATION":
+                        mod["pypi"] = False
+            # apply changes stated in modification
+            # this includes both database and script/application changes
+            if mod.get("type") == "APPLICATION" and mod.get("type") != \
+                    previous_row[2]:
+                pass
+                # TODO handle application
+            else:
+                if mod.get("name") != previous_row[1] and \
+                        mod.get("name") is not None:
+                    if mod.get("type") != previous_row[2] and \
+                            mod.get("type") is not None:
+                        if mod.get("type") == "APPLICATION":
+                            remove("/etc/ARBITER/directives/" + previous_row[1]
+                                   + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
+                                       previous_row[2]])
+                    rename("/etc/ARBITER/directives/" + previous_row[1]
+                        + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
+                            previous_row[2]],
+                        "/etc/ARBITER/directives/" + mod["name"]
+                        + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
+                            previous_row[2]])
+            try:
+                # i have achieved **elegance**
+                for key in mod:
+                    self.cursor.execute(
+                        "UPDATE agents SET " + key + "=:value" +
+                        " WHERE nid=:nid", {"nid": nid, "value": mod[key]})
+                self.connection.commit()
+            except sqlite3.OperationalError as parent_exception:
+                raise Exceptions.DatabaseManagerException(
+                    "Failed to edit directive entry for (NID) " + nid + ".") \
+                    from parent_exception
+            self.database_updated_event.set()
 
         def get_agent(self, uuid: str) -> tuple:
             """
             Get agent record in database.
 
-            :param uuid: str, agent UUID, must be alphanumeric, hyphens/dashes
-                are allowed, no spaces (as standard UUIDs should be),
-                non-standard UUIDs that disobey this specification will be
-                normalized through MD5 hashing
-            :return: tuple, database row for agent entry
+            :param uuid: agent UUID, must be alphanumeric, hyphens/dashes are
+                allowed, no spaces (as standard UUIDs should be), non-standard
+                UUIDs that disobey this specification will be normalized
+                through MD5 hashing
+            :type uuid: str
+            :return: database row for agent entry
+            :rtype: tuple
             """
-            uuid = Daemon.DirectivesManager.sanitize(uuid)
-            return self.cursor.execute("SELECT * FROM agents WHERE uuid = '" +
-                                       uuid + "';").fetchone()
+            return self.cursor.execute("SELECT * FROM agents WHERE uuid=:uuid",
+                                       {"uuid": self.sanitize(uuid)}
+                                       ).fetchone()
 
         def get_all_agents(self) -> list:
             """
             Get ALL agents from database.
 
-            :return: database row for agent entry
+            :return: all rows from agents database table
             :rtype: list
             """
             return list(self.cursor.execute("SELECT * FROM agents").fetchall())
+
+        def get_directive(self, nid: int) -> tuple:
+            """
+            Get directive record in database.
+
+            :param nid: numeric ID of directive
+            :type nid: int
+            :return: database row for directive entry
+            :rtype: tuple
+            """
+            return self.cursor.execute("SELECT * FROM directives WHERE "
+                                       "nid=:nid", {"nid": nid}).fetchone()
+
+        def get_all_directives(self) -> list:
+            """
+            Get ALL agents from database.
+
+            :return: all rows from directives database table
+            :rtype: list
+            """
+            return list(self.cursor.execute(
+                "SELECT * FROM directives").fetchall())
 
         def parse_directives(self, uuid: str) -> Union[list, object, None]:
             """
@@ -615,9 +742,9 @@ class Daemon(swbs.Server):
                 directive is an application
             :rtype: Union[list, object, None]
             """
-            entry = Daemon.DirectivesManager.get_agent(self, uuid)
+            entry = self.get_agent(uuid)
             if entry is None:
-                raise Exceptions.DirectivesManagerException(
+                raise Exceptions.DatabaseManagerException(
                     "Entry for (UUID) " + uuid + " does not exist.")
             if entry[2] is not None:
                 if entry[3] == "SCRIPT":
@@ -626,7 +753,7 @@ class Daemon(swbs.Server):
                         with open(entry[2]) as script_handle:
                             return script_handle.read().split("\n")
                     except BaseException as parent_exception:
-                        raise Exceptions.DirectivesManagerException(
+                        raise Exceptions.DatabaseManagerException(
                             "Failed to interpret script directive.") \
                             from parent_exception
                 elif entry[3] == "APPLICATION":
@@ -671,8 +798,8 @@ class Daemon(swbs.Server):
                                 continue
                             components = command.split("<#>")
                             execute = {"directive_assign": self.outer_self.
-                                       directives_manager.edit_agent(
-                                           self.outer_self.directives_manager,
+                                       database_manager.edit_agent(
+                                           self.outer_self.database_manager,
                                            components[1],
                                            {"directive_type": components[2],
                                             "directive_path": components[3]}),
