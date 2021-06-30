@@ -508,7 +508,7 @@ class Daemon(swbs.Server):
                         from parent_exception
             self.database_updated_event.set()
 
-        def add_directive(self, name: str, content: str,
+        def add_directive(self, name: str, content: Union[str, None],
                           directive_type: Literal["SCRIPT", "APPLICATION"],
                           is_pypi: bool) -> None:
             """
@@ -630,46 +630,22 @@ class Daemon(swbs.Server):
             :param nid: numeric ID of directive
             :type nid: str
             :param mod: should contain modifications to agent row, specify
-                "name", "type", and/or "pypi", (case-sensitive) as keys
+                "name" or "type", (case-sensitive) as keys
                 being the columns to be overwritten, the values attached to
                 keys being the new value of the column, columns cannot be
                 cleared and pypi cannot be set to True unless type is also
                 APPLICATION
             :type mod: dict
             """
-            # usually variables are used conservatively.
-            # however this function, using only returns for data,
-            # would consume an abhorrent amount of I/O bandwidth.
-            previous_row = self.get_directive(nid)
-            if mod.get("pypi") is True:
-                if mod.get("type") != "APPLICATION":
-                    mod["pypi"] = False
-                else:
-                    if previous_row[2] != "APPLICATION":
-                        mod["pypi"] = False
-            # apply changes stated in modification
-            # this includes both database and script/application changes
-            if mod.get("type") == "APPLICATION" and mod.get("type") != \
-                    previous_row[2]:
-                pass
-                # TODO handle application
-            else:
-                if mod.get("name") != previous_row[1] and \
-                        mod.get("name") is not None:
-                    if mod.get("type") != previous_row[2] and \
-                            mod.get("type") is not None:
-                        if mod.get("type") == "APPLICATION":
-                            remove("/etc/ARBITER/directives/" + previous_row[1]
-                                   + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
-                                       previous_row[2]])
-                    rename("/etc/ARBITER/directives/" + previous_row[1]
-                        + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
-                            previous_row[2]],
-                        "/etc/ARBITER/directives/" + mod["name"]
-                        + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
-                            previous_row[2]])
+            # pypi mod is disabled. overly complicates everything.
+            rename("/etc/ARBITER/directives/" + self.get_directive(nid)[1]
+                   + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
+                       self.get_directive(nid)[2]],
+                   "/etc/ARBITER/directives/" + mod.get(
+                       "name", self.get_directive(nid)[1])
+                   + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
+                       mod.get("type", self.get_directive(nid)[2])])
             try:
-                # i have achieved **elegance**
                 for key in mod:
                     self.cursor.execute(
                         "UPDATE agents SET " + key + "=:value" +
