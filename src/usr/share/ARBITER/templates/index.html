@@ -84,18 +84,22 @@
                         <p class="hint">// Currently selected an agent. See below for agent details and usage hints.</p>
                         <div id="selected-agent-data"></div>
                         <p class="hint">(i) Enter directive and select <i>Apply</i> to issue directives changes.</p>
-                        <hr>
                         <!-- todo, directives re-assignment and onclick triggers -->
-                        <hr>
+                        <p class="hint">[/!\] Stopping or restarting a script may result in unexpected and/or dangerous agent behavior. Please exert caution, and implement failsafes in your program.</p>
                         <div class="button-container">
                             <button onclick="" class="selected-agent-connection-dependent">Stop Directive</button>
                             <button onclick="" class="selected-agent-connection-dependent">Start Directive</button>
                             <button onclick="" class="selected-agent-connection-dependent">Restart Directive</button>
                         </div>
-                        <p class="hint">(i) Select <i>Cancel</i> to close, and <i>Disconnect</i> to manually disconnect the agent.</p>
+                        <p class="hint">[/!\] The collapsible section below include unsafe commands.</p>
+                        <button class="collapsible">Unsafe Commands</button>
+                        <div class="content">
+                            <button onclick="" style="color: var(--red);" class="selected-agent-connection-dependent">Disconnect Agent</button>
+                            <button onclick="removeAgent();" style="color: var(--red);">Remove Agent</button>
+                        </div>
+                        <p class="hint">(i) Tele-operation requires popups to be disabled.</p>
                         <div class="button-container">
-                            <button onclick="managerPanelClear(false);" style="color: var(--red);">Cancel</button>
-                            <button onclick="" style="color: var(--red);" class="selected-agent-connection-dependent">Disconnect</button>
+                            <button onclick="managerPanelClear(false);" style="color: var(--red);">Close</button>
                             <button onclick="" class="selected-agent-connnection-dependent">Operate</button>
                         </div>
                     </div>
@@ -116,13 +120,15 @@
                         </div>
                         <hr>
                         <div class="button-container">
-                            <button onclick="">Upload</button>
+                            <button onclick="addDirective();">Add</button>
                         </div>
+                        <hr>
                     </div>
                 </div>
             </div>
             <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
             <script src="https://mozilla.github.io/nunjucks/files/nunjucks.min.js" referrerpolicy="noreferrer"></script>
+            <script src="https://dreamerslegacy.xyz/js/collapse.min.js"></script>
             <script src="{{ url_for('static', filename='ui.js') }}"></script>
             <script src="{{ url_for('static', filename='socket.js') }}"></script>
         </div>

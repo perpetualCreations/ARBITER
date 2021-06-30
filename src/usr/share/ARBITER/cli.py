@@ -31,7 +31,7 @@ while True:
     # TODO insert commands here
     LOOKUP_COMMANDS = {
         "exit": lambda: exit(0),
-        "help": lambda: print([x for x in LOOKUP_COMMANDS])
+        "help": lambda: print("Commands:", [x for x in LOOKUP_COMMANDS])
     }
     try:
         LOOKUP_COMMANDS[input("> ").lower()]()

@@ -1,5 +1,6 @@
 var socket = io();
 var tableDataCache = [];
+var activeAgentSelected = "";
 
 socket.on("eventUpdate", data => {
     if (data["type"] == "STATE") {
@@ -29,12 +30,13 @@ socket.on("eventUpdate", data => {
             }
             if (data["id"] == "agents-table-content") {
                 // add select button to all agents
-                tableRow.innerHTML += ('<td><button onclick="' + "select('" + data["data"][row][0] + "');" + '">Select</button></td>'); 
+                tableRow.innerHTML += ('<td><button onclick="' + "select('" + data["data"][row][0] + "');" + '">Select</button></td>');
                 // when table content is for agents, cache into variable
                 tableDataCache = data["data"];
             }
             if (data["id"] == "directives-table-content") {
-                // TODO insert code here for adding remove/replace/edit directive buttons
+                tableRow.innerHTML += ('<td><button onclick="' + "removeDirective(" + String(data["data"][row][0]) +
+                ');">Remove</button><button onclick="' + "editDirective(" + String(data["data"][row][0]) + ');">Edit</button>' + "</td>");
             }
             document.getElementById(data["id"]).appendChild(tableRow);
         }
@@ -57,6 +59,11 @@ function addAgent() {
     document.getElementById("add-agent-waiting-message").style.display = "initial";
 }
 
+function removeAgent() {
+    dispatchCommand("REMOVE_AGENT", "PAYLOAD", activeAgentSelected);
+    managerPanelClear(false);
+}
+
 function select(uuid) {
     managerPanelClear(true);
     let template = `
@@ -64,7 +71,6 @@ function select(uuid) {
 <p>{{ agentDirective }}</p>
 <p>{{ agentConnectionStatus }}</p>
     `
-    // class add/remove spam, next time create a dummy class for buttons that are connection dependent, and select elements by that class
     connectionDependentInputs = document.querySelectorAll(".selected-agent-connection-dependent");
     for (let element of connectionDependentInputs.entries()) {
         element.classList.add("disabled");
@@ -86,6 +92,21 @@ function select(uuid) {
                     agentDirective: "Directive: " + tableDataCache[row][2],
                     agentConnectionStatus: "Status: " + connectionStatus
                 });
+            activeAgentSelected = uuid;
         }
     }
+}
+
+function addDirective() {
+    // TODO
+    dispatchCommand("ADD_DIRECTIVE", "PAYLOAD", null)
+}
+
+function editDirective() {
+    // TODO
+    dispatchCommand("ADD_DIRECTIVE", "PAYLOAD", null)
+}
+
+function removeDirective(nid) {
+    dispatchCommand("REMOVE_DIRECTIVE", "PAYLOAD", nid);
 }

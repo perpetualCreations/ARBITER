@@ -1,10 +1,5 @@
 function managerPanelClear(isFull) {
-    if (isFull == true) {
-        document.getElementById("empty-manage-hint").style.display = "none";
-    }
-    else {
-        document.getElementById("empty-manage-hint").style.display = "initial";
-    }
+    document.getElementById("empty-manage-hint").style.display = isFull ? "none" : "initial";
     document.getElementById("add-agent").style.display = "none";
     document.getElementById("selected-agent").style.display = "none";
     document.getElementById("manage-directives").style.display = "none";

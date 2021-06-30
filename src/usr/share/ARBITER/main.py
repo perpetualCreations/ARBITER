@@ -28,6 +28,7 @@ from os import remove, path, rename
 from concurrent.futures import ThreadPoolExecutor
 from ipaddress import IPv4Address, IPv4Network
 from subprocess import call
+from time import time, sleep
 import nmap3
 import swbs
 
@@ -120,7 +121,14 @@ class Daemon(swbs.Server):
                 self.agent_uuid = "FORESIGHT"
                 commands = {
                     "ADD_AGENT": lambda: self.payload_handler(
-                        Daemon.Herder.herd_target, self.instance.herder)
+                        Daemon.Herder.herd_target, self.instance.herder),
+                    "REMOVE_AGENT": lambda: self.payload_handler(
+                        Daemon.DatabaseManager.remove_agent,
+                        self.instance.database_manager),
+                    "ADD_DIRECTIVE": lambda: print("NOT IMPLEMENTED!"),
+                    "REMOVE_DIRECTIVE": lambda: self.payload_handler(
+                        Daemon.DatabaseManager.remove_directive,
+                        self.instance.database_manager)
                 }
                 while True:
                     if self.is_foresight_updater is False:
@@ -151,6 +159,7 @@ class Daemon(swbs.Server):
                                           add_agent_outcome).lower())
                             self.instance.herder.add_agent_outcome_event.\
                                 clear()
+                        # remove NID from table data
                         table_contents = self.instance.database_manager.\
                             get_all_agents()
                         for index, _dummy in enumerate(table_contents):
@@ -163,11 +172,19 @@ class Daemon(swbs.Server):
                             table_contents[index].append((
                                 table_contents[index][0] in self.instance.
                                 client_tracker.connected_uuids))
+                        # transmit table data for agents-table
                         Daemon.ClientManager.send(
                             self, "agents-table-content TABLE")
                         Daemon.ClientManager.receive(self)
                         Daemon.ClientManager.send(
                             self, str(table_contents))
+                        # transmit table data for directives-table
+                        Daemon.ClientManager.send(
+                            self, "directives-table-content")
+                        Daemon.ClientManager.receive(self)
+                        Daemon.ClientManager.send(
+                            self, str(self.instance.database_manager.
+                                      get_all_directives()))
                         self.instance.database_manager.\
                             database_updated_event.clear()
                         self.instance.client_tracker.\
@@ -198,8 +215,6 @@ class Daemon(swbs.Server):
                         if self.event_stop_directive.is_set() is True:
                             # probably unsafe for the agent, since the script
                             # can stop during execution
-                            # but we'll just slap on a bright yellow warning
-                            # to end users issuing directive stops
                             # TODO add option for safe stop user-defined script
                             break
                         if directives[index].split(" ")[0] == "GOTO":
@@ -472,6 +487,11 @@ class Daemon(swbs.Server):
             :rtype: str
             """
             # up for scrutiny, is this adequate sanitation?
+            # failsafe in case the given uuid is empty, create hash from
+            # current time
+            if len(uuid) == 0:
+                uuid = str(time())
+                sleep(1)
             uuid = uuid.replace(" ", "")
             if uuid.replace("-", "").isalnum() is False:
                 uuid = md5(uuid.encode("ascii")).hexdigest()
@@ -602,16 +622,16 @@ class Daemon(swbs.Server):
                 normalized through MD5 hashing
             :type uuid: str
             :param mod: should contain modifications to agent row, specify
-                "uuid", "directive_id", and/or "name", (case-sensitive) as keys
-                being the columns to be overwritten, the values attached to
-                keys being the new value of the column, to clear directive or
-                name set them to None
+                "directive_id" or "name" (case-sensitive) as keys being the
+                columns to be overwritten, the values attached to keys being
+                the new value of the column, to clear directive or name set
+                them to None
             :type mod: dict
             """
             uuid = self.sanitize(uuid)
             try:
                 for key in mod:
-                    if key in ["uuid", "directive_id", "name"]:
+                    if key in ["directive_id", "name"]:
                         self.cursor.execute(
                             "UPDATE agents SET " + key + "=:value" +
                             " WHERE uuid=:uuid", {"uuid": uuid,
@@ -630,11 +650,9 @@ class Daemon(swbs.Server):
             :param nid: numeric ID of directive
             :type nid: str
             :param mod: should contain modifications to agent row, specify
-                "name" or "type", (case-sensitive) as keys
-                being the columns to be overwritten, the values attached to
-                keys being the new value of the column, columns cannot be
-                cleared and pypi cannot be set to True unless type is also
-                APPLICATION
+                "name" or "type", (case-sensitive) as keys being the columns
+                to be overwritten, the values attached to keys being the new
+                value of the column, columns cannot be cleared
             :type mod: dict
             """
             # pypi mod is disabled. overly complicates everything.
