@@ -25,7 +25,6 @@ import threading
 from hashlib import md5
 from typing import Callable, Union, Literal
 from os import remove, path, rename
-from time import sleep
 from concurrent.futures import ThreadPoolExecutor
 from ipaddress import IPv4Address, IPv4Network
 from subprocess import call
@@ -549,7 +548,7 @@ class Daemon(swbs.Server):
                               directive_type], "w") as directive_file_handle:
                     directive_file_handle.write(content)
             else:
-                call("sudo pip install " + name, shell=True)
+                call("sudo python3 -m pip install " + name, shell=True)
             self.database_updated_event.set()
 
         def remove_agent(self, uuid: str) -> None:
@@ -588,8 +587,8 @@ class Daemon(swbs.Server):
                        + LOOKUP_DIRECTIVE_TYPE_TO_FILE_EXTENSION[
                            self.get_directive(nid)[2]])
             else:
-                call("sudo pip uninstall " + self.get_directive(nid)[1],
-                     shell=True)
+                call("sudo python3 -m pip uninstall " +
+                     self.get_directive(nid)[1], shell=True)
             self.cursor.execute("DELETE FROM directives WHERE nid=:nid",
                                 {"nid": nid})
 

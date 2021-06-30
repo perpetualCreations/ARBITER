@@ -1,6 +1,6 @@
 # !/bin/bash
 echo Installing Python 3 dependencies...
-sudo pip install -r /usr/share/ARBITER/requirements.txt
+sudo python3 -m pip install -r /usr/share/ARBITER/requirements.txt
 echo Done.
 sudo chmod +x /usr/bin/arbiter-manage
 echo ===================================================================================================================

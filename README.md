@@ -19,4 +19,4 @@ The stylesheet for the default redirect template is loaded from [dreamerslegacy.
 Please review [privacy policies here](https://dreamerslegacy.xyz/html/privacy.html).
 
 For users going off-grid, consider downloading 3rd-party assets from their sources,
-and editing references in FORESIGHT's source code to the local copy.
+and editing references in ARBITER's source code to the local copy.
