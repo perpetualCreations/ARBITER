@@ -69,7 +69,6 @@ class Daemon(swbs.Server):
                                     herder_start_on_init, herder_workers)
         self.database_manager = \
             Daemon.DatabaseManager("/etc/ARBITER/agency.db")
-        self.cli_queue_manager = Daemon.CLIQueueManager(self)
         super().__init__(port, key, Daemon.ClientManager, host, key_is_path,
                          no_listen_on_init)
 
@@ -613,9 +612,11 @@ class Daemon(swbs.Server):
             uuid = self.sanitize(uuid)
             try:
                 for key in mod:
-                    self.cursor.execute(
-                        "UPDATE agents SET " + key + "=:value" +
-                        " WHERE uuid=:uuid", {"uuid": uuid, "value": mod[key]})
+                    if key in ["uuid", "directive_id", "name"]:
+                        self.cursor.execute(
+                            "UPDATE agents SET " + key + "=:value" +
+                            " WHERE uuid=:uuid", {"uuid": uuid,
+                                                  "value": mod[key]})
                 self.connection.commit()
             except sqlite3.OperationalError as parent_exception:
                 raise Exceptions.DatabaseManagerException(
@@ -647,9 +648,10 @@ class Daemon(swbs.Server):
                        mod.get("type", self.get_directive(nid)[2])])
             try:
                 for key in mod:
-                    self.cursor.execute(
-                        "UPDATE agents SET " + key + "=:value" +
-                        " WHERE nid=:nid", {"nid": nid, "value": mod[key]})
+                    if key in ["name", "type"]:
+                        self.cursor.execute(
+                            "UPDATE agents SET " + key + "=:value" +
+                            " WHERE nid=:nid", {"nid": nid, "value": mod[key]})
                 self.connection.commit()
             except sqlite3.OperationalError as parent_exception:
                 raise Exceptions.DatabaseManagerException(
@@ -739,59 +741,3 @@ class Daemon(swbs.Server):
                     exec("import " + path.splitext(path.split(entry[2])[1])[0]
                          + " as target")
                     return target
-
-    class CLIQueueManager:
-        """Manages incoming commands from /etc/ARBITER/queue."""
-
-        def __init__(self, outer_self: Daemon):
-            """
-            Initialize manager.
-
-            :param outer_self: outer Daemon instance reference
-            :type outer_self: Daemon
-            :ivar self.outer_self: dump of parameter outer_self
-            :ivar self.thread: process thread
-            """
-            self.outer_self = outer_self
-            self.thread = threading.Thread(
-                target=Daemon.CLIQueueManager.process,
-                args=(self,), daemon=True)
-            self.thread.start()
-
-        def process(self) -> None:
-            """Process through queue contents."""
-            while True:
-                if path.isfile("/etc/ARBITER/queue_lock") is True:
-                    sleep(1)
-                else:
-                    with open("/etc/ARBITER/queue_lock") as lock_handler:
-                        lock_handler.write("\x00")
-                    with open("/etc/ARBITER/queue") as queue_handler:
-                        queue = queue_handler.read()
-                        queue = queue.split("\n")
-                        for command in queue:
-                            if command[:3] == "-#-":
-                                continue
-                            components = command.split("<#>")
-                            execute = {"directive_assign": self.outer_self.
-                                       database_manager.edit_agent(
-                                           self.outer_self.database_manager,
-                                           components[1],
-                                           {"directive_type": components[2],
-                                            "directive_path": components[3]}),
-                                       "directive_start": Daemon.
-                                       get_client_manager_by_uuid(
-                                           self.outer_self, components[1]).
-                                       event_start_directive.set(),
-                                       "directive_stop": Daemon.
-                                       get_client_manager_by_uuid(
-                                           self.outer_self, components[1]).
-                                       event_stop_directive.set()}
-                            execute[components[0]]()
-                    with open("/etc/ARBITER/queue", "w") as \
-                            queue_overwrite_handler:
-                        queue_overwrite_handler.write(
-                            "-#- This is the queue file, any CLI operations "
-                            "get dumped here for ARBITER to parse. "
-                            "Robots only.")
-                    remove("/etc/ARBITER/queue_lock")
