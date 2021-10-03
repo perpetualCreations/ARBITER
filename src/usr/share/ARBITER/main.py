@@ -15,7 +15,6 @@ Made by perpetualCreations
 
 Probably flexible enough for daemons to be modularized into separate server \
     instances, for meshes.
-Probably.
 """
 
 import sqlite3

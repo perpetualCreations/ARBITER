@@ -1,6 +1,4 @@
-"""
-Specifies Installed-Size in Debian package control file.
-"""
+"""Specifies Installed-Size in Debian package control file."""
 
 from pathlib import Path
 
