@@ -29,7 +29,7 @@ print("ARBITER CLI, v1.0\nReady for input. Type help for command list.")
 while True:
     # pylint: disable=unnecessary-lambda, used-before-assignment
     # TODO insert commands here
-    LOOKUP_COMMANDS = {
+    LOOKUP_COMMANDS: dict = {
         "exit": lambda: exit(0),
         "help": lambda: print("Commands:", [x for x in LOOKUP_COMMANDS])
     }
